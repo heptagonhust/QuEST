@@ -1,4 +1,4 @@
-# author: Ania Brown 
+# author: Ania Brown
 # author: Jacob Wilkins
 # author: Balint Koczor (Windows compatibility)
 
@@ -12,8 +12,12 @@ project(QuEST_Project)
 # ----- USER OPTIONS ----------------------------------------------------------
 # -----------------------------------------------------------------------------
 
-set(USER_SOURCE  "examples/random.c"  CACHE STRING "Source to build with QuEST library")
-set(OUTPUT_EXE   "demo"  CACHE STRING "Executable to compile to")
+set(RANDORM_SOURCE  "examples/random.c"  CACHE STRING "Source to build with QuEST library")
+
+set(QFT_SOURCE "examples/GHZ_QFT.c" CACHE STRING "QFT")
+
+set(RANDOM_OUTPUT_EXE   "demo"  CACHE STRING "Executable to compile to")
+set(QFT_OUTPUT_EXE "qft" CACHE STRING "qft executable")
 
 add_compile_options(-mavx)
 add_compile_options(-mvzeroupper)
@@ -25,12 +29,12 @@ set(QuEST_UTIL_DIR_NAME "utilities" CACHE STRING
 
 # -----------------------------------------------------------------------------
 # ----- QuEST LIBRARY ---------------------------------------------------------
-# ----------------------------------------------------------------------------- 
+# -----------------------------------------------------------------------------
 
 # Build the QuEST library if the path to libQuEST.so is not specified
 if (NOT DEFINED ${QuEST_LIB_PATH})
     # Build libQuEST.so
-    set(QuEST_DIR "QuEST" CACHE STRING 
+    set(QuEST_DIR "QuEST" CACHE STRING
         "Name of the directory containing the QuEST library sources. It must be located in the same directory as the root CMakeLists.txt")
     add_subdirectory(${QuEST_DIR})
     set(QuEST_LIB_PATH "${CMAKE_CURRENT_BINARY_DIR}/${QuEST_DIR}")
@@ -42,19 +46,31 @@ endif()
 # ----- USER EXECUTABLE -------------------------------------------------------
 # -----------------------------------------------------------------------------
 
-message(STATUS "Compiling ${USER_SOURCE} to executable ${OUTPUT_EXE}")
+message(STATUS "Compiling ${RANDORM_SOURCE} to executable ${RANDOM_OUTPUT_EXE}")
 
 
 # Create user executable
-add_executable(${OUTPUT_EXE} ${USER_SOURCE})
+add_executable(${RANDOM_OUTPUT_EXE} ${RANDORM_SOURCE})
 
 # Link libraries to user executable, including QuEST library
 if (WIN32)
-    target_link_libraries(${OUTPUT_EXE} QuEST)
+    target_link_libraries(${RANDOM_OUTPUT_EXE} QuEST)
 else ()
-    target_link_libraries(${OUTPUT_EXE} QuEST m)
+    target_link_libraries(${RANDOM_OUTPUT_EXE} QuEST m)
 endif()
 
+message(STATUS "Compiling ${QFT_SOURCE} to executable ${QFT_OUTPUT_EXE}")
+
+
+# Create user executable
+add_executable(${QFT_OUTPUT_EXE} ${RANDORM_SOURCE})
+
+# Link libraries to user executable, including QuEST library
+if (WIN32)
+    target_link_libraries(${QFT_OUTPUT_EXE} QuEST)
+else ()
+    target_link_libraries(${QFT_OUTPUT_EXE} QuEST m)
+endif()
 
 # -----------------------------------------------------------------------------
 # ----- UTILS -----------------------------------------------------------------
@@ -99,4 +115,3 @@ add_custom_target( update_QuEST_lib_loc
   DEPENDS QuESTPy
   COMMAND ${CMAKE_COMMAND} -DQuEST_ROOT=${PROJECT_SOURCE_DIR} -DQuESTPy_PATH=${QuESTPy_PATH} -DQuEST_LIB_EXACT=${QuEST_LIB_EXACT} -DQuEST_LIB_PATH=${QuEST_LIB_PATH} -P ${PROJECT_SOURCE_DIR}/cmake/QuESTPyLib.cmake
   )
-
