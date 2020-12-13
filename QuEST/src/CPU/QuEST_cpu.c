@@ -1747,12 +1747,12 @@ void statevec_compactUnitaryLocalSIMD (Qureg qureg, const int targetQubit, Compl
             // state[indexUp] = alpha * state[indexUp] - conj(beta)  * state[indexLo]
             //stateVecReal[indexUp] = alphaReal*stateRealUp - alphaImag*stateImagUp
             //    - betaReal*stateRealLo - betaImag*stateImagLo;
-            register __m256d res1 = _mm256_mul_pd(alphaRealSIMD, stateRealUpSIMD);
-            register __m256d alphaImag_times_stateImagUp =
+            __m256d res1 = _mm256_mul_pd(alphaRealSIMD, stateRealUpSIMD);
+            __m256d alphaImag_times_stateImagUp =
                 _mm256_mul_pd(alphaImagSIMD, stateImagUpSIMD);
-            register __m256d betaReal_times_stateRealLo =
+            __m256d betaReal_times_stateRealLo =
                 _mm256_mul_pd(betaRealSIMD, stateRealLoSIMD);
-            register __m256d betaImag_times_stateImagLo =
+            __m256d betaImag_times_stateImagLo =
                 _mm256_mul_pd(betaImagSIMD, stateImagLoSIMD);
             // then merge these 4 vectors
             res1 = _mm256_sub_pd(res1, alphaImag_times_stateImagUp);
@@ -1768,12 +1768,12 @@ void statevec_compactUnitaryLocalSIMD (Qureg qureg, const int targetQubit, Compl
 
             //stateVecImag[indexUp] = alphaReal*stateImagUp + alphaImag*stateRealUp
             //    - betaReal*stateImagLo + betaImag*stateRealLo;
-            register __m256d res2 = _mm256_mul_pd(alphaRealSIMD, stateImagUpSIMD);
-            register __m256d alphaImag_times_stateRealUp =
+            __m256d res2 = _mm256_mul_pd(alphaRealSIMD, stateImagUpSIMD);
+            __m256d alphaImag_times_stateRealUp =
                 _mm256_mul_pd(alphaImagSIMD, stateRealUpSIMD);
-            register __m256d betaReal_times_stateRealUp =
+            __m256d betaReal_times_stateRealUp =
                 _mm256_mul_pd(betaRealSIMD, stateImagLoSIMD);
-            register __m256d betaImag_times_stateRealLo =
+            __m256d betaImag_times_stateRealLo =
                 _mm256_mul_pd(betaImagSIMD,stateRealLoSIMD);
 
             res2 = _mm256_sub_pd(res2, betaReal_times_stateRealUp);
@@ -1788,12 +1788,12 @@ void statevec_compactUnitaryLocalSIMD (Qureg qureg, const int targetQubit, Compl
             // state[indexLo] = beta  * state[indexUp] + conj(alpha) * state[indexLo]
             //stateVecReal[indexLo] = betaReal*stateRealUp - betaImag*stateImagUp
             //    + alphaReal*stateRealLo + alphaImag*stateImagLo;
-            register __m256d res3 = _mm256_mul_pd(betaRealSIMD, stateRealUpSIMD);
-            register __m256d betaImag_times_stateImagUp =
+            __m256d res3 = _mm256_mul_pd(betaRealSIMD, stateRealUpSIMD);
+            __m256d betaImag_times_stateImagUp =
                 _mm256_mul_pd(betaImagSIMD, stateImagUpSIMD);
-            register __m256d alphaReal_times_stateRealLo =
+            __m256d alphaReal_times_stateRealLo =
                 _mm256_mul_pd(alphaRealSIMD, stateRealLoSIMD);
-            register __m256d alphaImag_times_stateImagLo =
+            __m256d alphaImag_times_stateImagLo =
                 _mm256_mul_pd(alphaImagSIMD, stateImagLoSIMD);
 
             res3 = _mm256_sub_pd(res3, betaImag_times_stateImagUp);
@@ -1806,12 +1806,12 @@ void statevec_compactUnitaryLocalSIMD (Qureg qureg, const int targetQubit, Compl
 
             //stateVecImag[indexLo] = betaReal*stateImagUp + betaImag*stateRealUp
             //    + alphaReal*stateImagLo - alphaImag*stateRealLo;
-            register __m256d res4 = _mm256_mul_pd(betaRealSIMD, stateImagUpSIMD);
-            register __m256d betaImag_times_stateRealUp =
+            __m256d res4 = _mm256_mul_pd(betaRealSIMD, stateImagUpSIMD);
+            __m256d betaImag_times_stateRealUp =
                 _mm256_mul_pd(betaImagSIMD, stateRealUpSIMD);
-            register __m256d alphaReal_times_stateImagLo =
+            __m256d alphaReal_times_stateImagLo =
                 _mm256_mul_pd(alphaRealSIMD, stateImagLoSIMD);
-            register __m256d alphaImag_times_stateRealLo =
+            __m256d alphaImag_times_stateRealLo =
                 _mm256_mul_pd(alphaImagSIMD, stateRealLoSIMD);
             res4 = _mm256_sub_pd(res4, alphaImag_times_stateRealLo);
             betaImag_times_stateRealUp = _mm256_add_pd(
