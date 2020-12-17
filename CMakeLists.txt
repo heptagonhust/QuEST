@@ -63,7 +63,7 @@ message(STATUS "Compiling ${QFT_SOURCE} to executable ${QFT_OUTPUT_EXE}")
 
 
 # Create user executable
-add_executable(${QFT_OUTPUT_EXE} ${RANDORM_SOURCE})
+add_executable(${QFT_OUTPUT_EXE} ${QFT_SOURCE})
 
 # Link libraries to user executable, including QuEST library
 if (WIN32)
