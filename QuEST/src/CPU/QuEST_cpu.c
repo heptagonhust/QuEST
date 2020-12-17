@@ -2699,14 +2699,17 @@ void statevec_controlledCompactUnitaryDistributedSIMD (Qureg qureg, const int co
     long long int thisTask;  
     long long int thisBlock;
     long long int taskEnd;
-    long long int blockEnd;
     const long long int chunkSize=qureg.numAmpsPerChunk;
     const long long int chunkId=qureg.chunkId;
-    const long long int chunkEnd=(chunkId+1)*chunkSize;
-    const long long int blockSize=1<<controlQubit;
-    const long long int blockStart=chunkId*chunkSize/(blockSize);
-    const long long int blockRange=(chunkSize>blockSize)?(chunkSize/blockSize):1;
 
+    const long long int blockSize=2LL<<controlQubit;
+    const long long int halfBlockSize = blockSize>>1;
+
+    const long long int blockStart=(chunkId*chunkSize)/(blockSize);
+    const long long int blockRange=(chunkSize>blockSize)?(chunkSize/blockSize):1;
+    const long long int blockEnd=(chunkId+1)*chunkSize-blockStart*blockSize;
+    if(blockEnd <= 0) return;
+    
     qreal rot1Real=rot1.real, rot1Imag=rot1.imag;
     qreal rot2Real=rot2.real, rot2Imag=rot2.imag;
     qreal *stateVecRealUp=stateVecUp.real, *stateVecImagUp=stateVecUp.imag;
@@ -2722,16 +2725,15 @@ void statevec_controlledCompactUnitaryDistributedSIMD (Qureg qureg, const int co
 # pragma omp parallel \
     shared   (stateVecRealUp,stateVecImagUp,stateVecRealLo,stateVecImagLo,stateVecRealOut,stateVecImagOut, \
             rot1RealSIMD,rot1ImagSIMD, rot2RealSIMD,rot2ImagSIMD) \
-    private  (thisTask,thisBlock,blockEnd,taskEnd,stateRealUpSIMD,stateImagUpSIMD,stateRealLoSIMD,stateImagLoSIMD)
+    private  (thisTask,thisBlock,taskEnd,stateRealUpSIMD,stateImagUpSIMD,stateRealLoSIMD,stateImagLoSIMD)
 # endif
     {
 # ifdef _OPENMP
 # pragma omp for schedule (static)
 # endif
-        for(thisBlock=blockStart; thisBlock<blockStart+blockRange; thisBlock++){
-            blockEnd = (thisBlock+1)*blockSize;
-            taskEnd = fmin(blockEnd,chunkEnd) - chunkId*chunkSize;
-            for(thisTask=thisBlock*blockSize+(blockSize>>1) - chunkId*chunkSize; thisTask<taskEnd; thisTask+=4){
+        for(thisBlock=0; thisBlock<blockRange; thisBlock++){
+            taskEnd = fmin(blockEnd,(thisBlock+1)*blockSize);
+            for(thisTask=thisBlock*blockSize+halfBlockSize; thisTask<taskEnd; thisTask+=4){
                 stateRealUpSIMD = _mm256_loadu_pd(stateVecRealUp+thisTask);
                 stateImagUpSIMD = _mm256_loadu_pd(stateVecImagUp+thisTask);
 
