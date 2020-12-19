@@ -1,4 +1,4 @@
-// Distributed under MIT licence. See https://github.com/QuEST-Kit/QuEST/blob/master/LICENCE.txt for details 
+// Distributed under MIT licence. See https://github.com/QuEST-Kit/QuEST/blob/master/LICENCE.txt for details
 
 /** @file
  * An implementation of the backend in ../QuEST_ops.h for an MPI environment.
@@ -32,17 +32,17 @@
 
 
 Complex statevec_calcInnerProduct(Qureg bra, Qureg ket) {
-    
+
     Complex localInnerProd = statevec_calcInnerProductLocal(bra, ket);
     if (bra.numChunks == 1)
         return localInnerProd;
-    
+
     qreal localReal = localInnerProd.real;
     qreal localImag = localInnerProd.imag;
     qreal globalReal, globalImag;
     MPI_Allreduce(&localReal, &globalReal, 1, MPI_QuEST_REAL, MPI_SUM, MPI_COMM_WORLD);
     MPI_Allreduce(&localImag, &globalImag, 1, MPI_QuEST_REAL, MPI_SUM, MPI_COMM_WORLD);
-    
+
     Complex globalInnerProd;
     globalInnerProd.real = globalReal;
     globalInnerProd.imag = globalImag;
@@ -50,50 +50,50 @@ Complex statevec_calcInnerProduct(Qureg bra, Qureg ket) {
 }
 
 qreal densmatr_calcTotalProb(Qureg qureg) {
-	
+
 	// computes the trace by summing every element ("diag") with global index (2^n + 1)i for i in [0, 2^n-1]
-	
+
 	// computes first local index containing a diagonal element
 	long long int diagSpacing = 1LL + (1LL << qureg.numQubitsRepresented);
     long long int numPrevDiags = (qureg.chunkId>0)? 1+(qureg.chunkId*qureg.numAmpsPerChunk)/diagSpacing : 0;
 	long long int globalIndNextDiag = diagSpacing * numPrevDiags;
 	long long int localIndNextDiag = globalIndNextDiag % qureg.numAmpsPerChunk;
 	long long int index;
-	
+
 	qreal rankTotal = 0;
 	qreal y, t, c;
 	c = 0;
-	
+
 	// iterates every local diagonal
 	for (index=localIndNextDiag; index < qureg.numAmpsPerChunk; index += diagSpacing) {
-		
+
 		// Kahan summation - brackets are important
 		y = qureg.stateVec.real[index] - c;
 		t = rankTotal + y;
 		c = ( t - rankTotal ) - y;
 		rankTotal = t;
 	}
-	
+
 	// combine each node's sum of diagonals
 	qreal globalTotal;
 	if (qureg.numChunks > 1)
 		MPI_Allreduce(&rankTotal, &globalTotal, 1, MPI_QuEST_REAL, MPI_SUM, MPI_COMM_WORLD);
 	else
 		globalTotal = rankTotal;
-	
+
 	return globalTotal;
 }
 
 qreal statevec_calcTotalProb(Qureg qureg){
     // Implemented using Kahan summation for greater accuracy at a slight floating
     //   point operation overhead. For more details see https://en.wikipedia.org/wiki/Kahan_summation_algorithm
-    qreal pTotal=0; 
+    qreal pTotal=0;
     qreal y, t, c;
     qreal allRankTotals=0;
     long long int index;
     long long int numAmpsPerRank = qureg.numAmpsPerChunk;
     c = 0.0;
-    for (index=0; index<numAmpsPerRank; index++){ 
+    for (index=0; index<numAmpsPerRank; index++){
         // Perform pTotal+=qureg.stateVec.real[index]*qureg.stateVec.real[index]; by Kahan
         y = qureg.stateVec.real[index]*qureg.stateVec.real[index] - c;
         t = pTotal + y;
@@ -106,10 +106,10 @@ qreal statevec_calcTotalProb(Qureg qureg){
         // Don't change the bracketing on the following line
         c = ( t - pTotal ) - y;
         pTotal = t;
-    } 
+    }
     if (qureg.numChunks>1)
 		MPI_Allreduce(&pTotal, &allRankTotals, 1, MPI_QuEST_REAL, MPI_SUM, MPI_COMM_WORLD);
-    else 
+    else
 		allRankTotals=pTotal;
 
     return allRankTotals;
@@ -126,9 +126,9 @@ static int halfMatrixBlockFitsInChunk(long long int chunkSize, int targetQubit);
 static int getChunkIdFromIndex(Qureg qureg, long long int index);
 
 QuESTEnv createQuESTEnv(void) {
-    
+
     QuESTEnv env;
-    
+
     // init MPI environment
     int rank, numRanks, initialized;
     MPI_Initialized(&initialized);
@@ -141,18 +141,18 @@ QuESTEnv createQuESTEnv(void) {
         env.numRanks=numRanks;
 
     } else {
-        
+
         printf("ERROR: Trying to initialize QuESTEnv multiple times. Ignoring...\n");
-        
+
         // ensure env is initialised anyway, so the compiler is happy
         MPI_Comm_size(MPI_COMM_WORLD, &numRanks);
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
         env.rank=rank;
         env.numRanks=numRanks;
 	}
-    
+
 	seedQuESTDefault();
-    
+
     return env;
 }
 
@@ -175,7 +175,7 @@ void destroyQuESTEnv(QuESTEnv env){
 
 void reportQuESTEnv(QuESTEnv env){
     if (env.rank==0){
-        printf("EXECUTION ENVIRONMENT:\n"); 
+        printf("EXECUTION ENVIRONMENT:\n");
         printf("Running distributed (MPI) version\n");
         printf("Number of ranks is %d\n", env.numRanks);
 # ifdef _OPENMP
@@ -183,7 +183,7 @@ void reportQuESTEnv(QuESTEnv env){
         printf("Number of threads available is %d\n", omp_get_max_threads());
 # else
         printf("OpenMP disabled\n");
-# endif 
+# endif
         printf("Precision: size of qreal is %ld bytes\n", sizeof(qreal) );
     }
 }
@@ -194,35 +194,35 @@ int getChunkIdFromIndex(Qureg qureg, long long int index){
 
 qreal statevec_getRealAmp(Qureg qureg, long long int index){
     int chunkId = getChunkIdFromIndex(qureg, index);
-    qreal el; 
+    qreal el;
     if (qureg.chunkId==chunkId){
         el = qureg.stateVec.real[index-chunkId*qureg.numAmpsPerChunk];
     }
     MPI_Bcast(&el, 1, MPI_QuEST_REAL, chunkId, MPI_COMM_WORLD);
-    return el; 
-} 
+    return el;
+}
 
 qreal statevec_getImagAmp(Qureg qureg, long long int index){
     int chunkId = getChunkIdFromIndex(qureg, index);
-    qreal el; 
+    qreal el;
     if (qureg.chunkId==chunkId){
         el = qureg.stateVec.imag[index-chunkId*qureg.numAmpsPerChunk];
     }
     MPI_Bcast(&el, 1, MPI_QuEST_REAL, chunkId, MPI_COMM_WORLD);
-    return el; 
+    return el;
 }
 
 /** Returns whether a given chunk in position chunkId is in the upper or lower half of
   a block.
- * 
+ *
  * @param[in] chunkId id of chunk in state vector
  * @param[in] chunkSize number of amps in chunk
- * @param[in] targetQubit qubit being rotated 
- * @return 1: chunk is in upper half of block, 0: chunk is in lower half of block 
+ * @param[in] targetQubit qubit being rotated
+ * @return 1: chunk is in upper half of block, 0: chunk is in lower half of block
  */
 //! fix -- is this the same as isChunkToSkip?
 static int chunkIsUpper(int chunkId, long long int chunkSize, int targetQubit)
-{       
+{
     long long int sizeHalfBlock = 1LL << (targetQubit);
     long long int sizeBlock = sizeHalfBlock*2;
     long long int posInBlock = (chunkId*chunkSize) % sizeBlock;
@@ -231,7 +231,7 @@ static int chunkIsUpper(int chunkId, long long int chunkSize, int targetQubit)
 
 //! fix -- do with masking instead
 static int chunkIsUpperInOuterBlock(int chunkId, long long int chunkSize, int targetQubit, int numQubits)
-{       
+{
     long long int sizeOuterHalfBlock = 1LL << (targetQubit+numQubits);
     long long int sizeOuterBlock = sizeOuterHalfBlock*2;
     long long int posInBlock = (chunkId*chunkSize) % sizeOuterBlock;
@@ -240,7 +240,7 @@ static int chunkIsUpperInOuterBlock(int chunkId, long long int chunkSize, int ta
 
 /** Get rotation values for a given chunk
  * @param[in] chunkIsUpper 1: chunk is in upper half of block, 0: chunk is in lower half
- * 
+ *
  * @param[out] rot1, rot2 rotation values to use, allocated for upper/lower such that
  * @verbatim
  stateUpper = rot1 * stateUpper + conj(rot2)  * stateLower
@@ -250,7 +250,7 @@ static int chunkIsUpperInOuterBlock(int chunkId, long long int chunkSize, int ta
  stateLower = rot1 * stateUpper + conj(rot2)  * stateLower
  @endverbatim
  *
- * @param[in] alpha, beta initial rotation values 
+ * @param[in] alpha, beta initial rotation values
  */
 static void getRotAngle(int chunkIsUpper, Complex *rot1, Complex *rot2, Complex alpha, Complex beta)
 {
@@ -266,7 +266,7 @@ static void getRotAngle(int chunkIsUpper, Complex *rot1, Complex *rot2, Complex 
 
 /** Get rotation values for a given chunk given a unitary matrix
  * @param[in] chunkIsUpper 1: chunk is in upper half of block, 0: chunk is in lower half
- * 
+ *
  * @param[out] rot1, rot2 rotation values to use, allocated for upper/lower such that
  * @verbatim
  stateUpper = rot1 * stateUpper + conj(rot2)  * stateLower
@@ -290,12 +290,12 @@ static void getRotAngleFromUnitaryMatrix(int chunkIsUpper, Complex *rot1, Comple
 
 /** get position of corresponding chunk, holding values required to
  * update values in my chunk (with chunkId) when rotating targetQubit.
- * 
+ *
  * @param[in] chunkIsUpper 1: chunk is in upper half of block, 0: chunk is in lower half
  * @param[in] chunkId id of chunk in state vector
  * @param[in] chunkSize number of amps in chunk
- * @param[in] targetQubit qubit being rotated 
- * @return chunkId of chunk required to rotate targetQubit 
+ * @param[in] targetQubit qubit being rotated
+ * @return chunkId of chunk required to rotate targetQubit
  */
 static int getChunkPairId(int chunkIsUpper, int chunkId, long long int chunkSize, int targetQubit)
 {
@@ -319,7 +319,7 @@ static int getChunkOuterBlockPairId(int chunkIsUpper, int chunkId, long long int
     }
 }
 
-static int getChunkOuterBlockPairIdForPart3(int chunkIsUpperSmallerQubit, int chunkIsUpperBiggerQubit, int chunkId, 
+static int getChunkOuterBlockPairIdForPart3(int chunkIsUpperSmallerQubit, int chunkIsUpperBiggerQubit, int chunkId,
         long long int chunkSize, int smallerQubit, int biggerQubit, int numQubits)
 {
     long long int sizeOuterHalfBlockBiggerQubit = 1LL << (biggerQubit+numQubits);
@@ -344,9 +344,9 @@ static int getChunkOuterBlockPairIdForPart3(int chunkIsUpperSmallerQubit, int ch
 
 /** return whether the current qubit rotation will use
  * blocks that fit within a single chunk.
- * 
+ *
  * @param[in] chunkSize number of amps in chunk
- * @param[in] targetQubit qubit being rotated 
+ * @param[in] targetQubit qubit being rotated
  * @return 1: one chunk fits in one block 0: chunk is larger than block
  */
 //! fix -- this should be renamed to matrixBlockFitsInChunk
@@ -366,82 +366,82 @@ static int densityMatrixBlockFitsInChunk(long long int chunkSize, int numQubits,
 /** This copies/clones vec (a statevector) into every node's matr pairState.
  * (where matr is a density matrix or equal number of qubits as vec) */
 void copyVecIntoMatrixPairState(Qureg matr, Qureg vec) {
-    
+
     // Remember that for every amplitude that `vec` stores on the node,
     // `matr` stores an entire column. Ergo there are always an integer
     // number (in fact, a power of 2) number of  `matr`s columns on each node.
     // Since the total size of `vec` (between all nodes) is one column
-    // and each node stores (possibly) multiple columns (vec.numAmpsPerChunk as many), 
+    // and each node stores (possibly) multiple columns (vec.numAmpsPerChunk as many),
     // `vec` can be fit entirely inside a single node's matr.pairStateVec (with excess!)
-    
+
     // copy this node's vec segment into this node's matr pairState (in the right spot)
     long long int numLocalAmps = vec.numAmpsPerChunk;
     long long int myOffset = vec.chunkId * numLocalAmps;
     memcpy(&matr.pairStateVec.real[myOffset], vec.stateVec.real, numLocalAmps * sizeof(qreal));
     memcpy(&matr.pairStateVec.imag[myOffset], vec.stateVec.imag, numLocalAmps * sizeof(qreal));
-    
-    // we now want to share this node's vec segment with other node, so that 
-    // vec is cloned in every node's matr.pairStateVec 
+
+    // we now want to share this node's vec segment with other node, so that
+    // vec is cloned in every node's matr.pairStateVec
 
     // work out how many messages needed to send vec chunks (2GB limit)
     long long int maxMsgSize = MPI_MAX_AMPS_IN_MSG;
-    if (numLocalAmps < maxMsgSize) 
+    if (numLocalAmps < maxMsgSize)
         maxMsgSize = numLocalAmps;
     // safely assume MPI_MAX... = 2^n, so division always exact:
     int numMsgs = numLocalAmps / maxMsgSize;
-    
+
     // every node gets a turn at being the broadcaster
     for (int broadcaster=0; broadcaster < vec.numChunks; broadcaster++) {
-        
+
         long long int otherOffset = broadcaster * numLocalAmps;
-    
+
         // every node sends a slice of qureg's pairState to every other
         for (int i=0; i< numMsgs; i++) {
-    
+
             // by sending that slice in further slices (due to bandwidth limit)
             MPI_Bcast(
-                &matr.pairStateVec.real[otherOffset + i*maxMsgSize], 
+                &matr.pairStateVec.real[otherOffset + i*maxMsgSize],
                 maxMsgSize,  MPI_QuEST_REAL, broadcaster, MPI_COMM_WORLD);
             MPI_Bcast(
-                &matr.pairStateVec.imag[otherOffset + i*maxMsgSize], 
+                &matr.pairStateVec.imag[otherOffset + i*maxMsgSize],
                 maxMsgSize,  MPI_QuEST_REAL, broadcaster, MPI_COMM_WORLD);
         }
     }
 }
 
 qreal densmatr_calcFidelity(Qureg qureg, Qureg pureState) {
-    
+
     // set qureg's pairState is to be the full pureState (on every node)
     copyVecIntoMatrixPairState(qureg, pureState);
- 
+
     // collect calcFidelityLocal by every machine
     qreal localSum = densmatr_calcFidelityLocal(qureg, pureState);
-    
+
     // sum each localSum
     qreal globalSum;
     MPI_Allreduce(&localSum, &globalSum, 1, MPI_QuEST_REAL, MPI_SUM, MPI_COMM_WORLD);
-    
+
     return globalSum;
 }
 
 qreal densmatr_calcHilbertSchmidtDistance(Qureg a, Qureg b) {
-    
+
     qreal localSum = densmatr_calcHilbertSchmidtDistanceSquaredLocal(a, b);
-    
+
     qreal globalSum;
     MPI_Allreduce(&localSum, &globalSum, 1, MPI_QuEST_REAL, MPI_SUM, MPI_COMM_WORLD);
-    
+
     qreal dist = sqrt(globalSum);
     return dist;
 }
 
 qreal densmatr_calcInnerProduct(Qureg a, Qureg b) {
-    
+
     qreal localSum = densmatr_calcInnerProductLocal(a, b);
-    
+
     qreal globalSum;
     MPI_Allreduce(&localSum, &globalSum, 1, MPI_QuEST_REAL, MPI_SUM, MPI_COMM_WORLD);
-    
+
     qreal dist = globalSum;
     return dist;
 }
@@ -467,7 +467,7 @@ void densmatr_initPureState(Qureg targetQureg, Qureg copyQureg) {
     } else {
         // set qureg's pairState is to be the full pure state (on every node)
         copyVecIntoMatrixPairState(targetQureg, copyQureg);
-        
+
         // update every density matrix chunk using pairState
         densmatr_initPureStateLocal(targetQureg, copyQureg);
     }
@@ -484,9 +484,9 @@ void exchangeStateVectors(Qureg qureg, int pairRank){
     // For openmpi, messages are further restricted to 2GB in size -- do this for all cases
     // to be safe
     long long int maxMessageCount = MPI_MAX_AMPS_IN_MSG;
-    if (qureg.numAmpsPerChunk < maxMessageCount) 
+    if (qureg.numAmpsPerChunk < maxMessageCount)
         maxMessageCount = qureg.numAmpsPerChunk;
-    
+
     // safely assume MPI_MAX... = 2^n, so division always exact
     int numMessages = qureg.numAmpsPerChunk/maxMessageCount;
     int i;
@@ -515,9 +515,9 @@ void exchangePairStateVectorHalves(Qureg qureg, int pairRank){
     // For openmpi, messages are further restricted to 2GB in size -- do this for all cases
     // to be safe
     long long int maxMessageCount = MPI_MAX_AMPS_IN_MSG;
-    if (numAmpsToSend < maxMessageCount) 
+    if (numAmpsToSend < maxMessageCount)
         maxMessageCount = numAmpsToSend;
-    
+
     // safely assume MPI_MAX... = 2^n, so division always exact
     int numMessages = numAmpsToSend/maxMessageCount;
     int i;
@@ -526,12 +526,12 @@ void exchangePairStateVectorHalves(Qureg qureg, int pairRank){
     // receive pairRank's state vector into the top of qureg.pairStateVec
     for (i=0; i<numMessages; i++){
         offset = i*maxMessageCount;
-        MPI_Sendrecv(&qureg.pairStateVec.real[offset+numAmpsToSend], maxMessageCount, 
+        MPI_Sendrecv(&qureg.pairStateVec.real[offset+numAmpsToSend], maxMessageCount,
                 MPI_QuEST_REAL, pairRank, TAG,
                 &qureg.pairStateVec.real[offset], maxMessageCount, MPI_QuEST_REAL,
                 pairRank, TAG, MPI_COMM_WORLD, &status);
         //printf("rank: %d err: %d\n", qureg.rank, err);
-        MPI_Sendrecv(&qureg.pairStateVec.imag[offset+numAmpsToSend], maxMessageCount, 
+        MPI_Sendrecv(&qureg.pairStateVec.imag[offset+numAmpsToSend], maxMessageCount,
                 MPI_QuEST_REAL, pairRank, TAG,
                 &qureg.pairStateVec.imag[offset], maxMessageCount, MPI_QuEST_REAL,
                 pairRank, TAG, MPI_COMM_WORLD, &status);
@@ -547,7 +547,7 @@ void compressPairVectorForSingleQubitDepolarise(Qureg qureg, const int targetQub
          thisIndex,    // current index in (density matrix representation) state vector
          thisIndexInOuterColumn,
          thisIndexInInnerBlock;
-         
+
     int outerBit;
 
     long long int thisTask;
@@ -561,10 +561,9 @@ void compressPairVectorForSingleQubitDepolarise(Qureg qureg, const int targetQub
 
 # ifdef _OPENMP
 # pragma omp parallel \
-    \\//
     shared   (sizeInnerBlock,sizeInnerHalfBlock,sizeOuterColumn,sizeOuterHalfColumn,qureg) \
     private  (thisTask,thisInnerBlock,thisOuterColumn,thisIndex,thisIndexInOuterColumn, \
-                thisIndexInInnerBlock,outerBit) 
+                thisIndexInInnerBlock,outerBit)
 # endif
     {
 # ifdef _OPENMP
@@ -573,7 +572,7 @@ void compressPairVectorForSingleQubitDepolarise(Qureg qureg, const int targetQub
         // thisTask iterates over half the elements in this process' chunk of the density matrix
         // treat this as iterating over all columns, then iterating over half the values
         // within one column.
-        // If this function has been called, this process' chunk contains half an 
+        // If this function has been called, this process' chunk contains half an
         // outer block or less
         for (thisTask=0; thisTask<numTasks; thisTask++) {
             // we want to process all columns in the density matrix,
@@ -591,9 +590,9 @@ void compressPairVectorForSingleQubitDepolarise(Qureg qureg, const int targetQub
             // of the inner block as well (we want to dephase |0><0| and |1><1| only)
             thisIndex += outerBit*(sizeInnerHalfBlock);
 
-            // NOTE: at this point thisIndex should be the index of the element we want to 
-            // dephase in the chunk of the state vector on this process, in the 
-            // density matrix representation. 
+            // NOTE: at this point thisIndex should be the index of the element we want to
+            // dephase in the chunk of the state vector on this process, in the
+            // density matrix representation.
             // thisTask is the index of the pair element in pairStateVec
             // we will populate the second half of pairStateVec with this process'
             // data to send
@@ -611,7 +610,7 @@ void compressPairVectorForTwoQubitDepolarise(Qureg qureg, const int targetQubit,
     long long int sizeInnerBlockQ1, sizeInnerHalfBlockQ1;
     long long int sizeInnerBlockQ2, sizeInnerHalfBlockQ2, sizeInnerQuarterBlockQ2;
     long long int sizeOuterColumn, sizeOuterQuarterColumn;
-    long long int 
+    long long int
          thisInnerBlockQ2,
          thisOuterColumn, // current column in density matrix
          thisIndex,    // current index in (density matrix representation) state vector
@@ -632,15 +631,14 @@ void compressPairVectorForTwoQubitDepolarise(Qureg qureg, const int targetQubit,
     sizeInnerBlockQ1 = 2LL * sizeInnerHalfBlockQ1;
     sizeOuterColumn = 1LL << qureg.numQubitsRepresented;
     sizeOuterQuarterColumn = sizeOuterColumn >> 2;
- 
+
 # ifdef _OPENMP
 # pragma omp parallel \
-    \\//
     shared   (sizeInnerBlockQ1,sizeInnerHalfBlockQ1,sizeInnerQuarterBlockQ2,sizeInnerHalfBlockQ2,sizeInnerBlockQ2, \
                 sizeOuterColumn, \
                 sizeOuterQuarterColumn,qureg) \
     private  (thisTask,thisInnerBlockQ2,thisOuterColumn,thisIndex,thisIndexInOuterColumn, \
-                thisIndexInInnerBlockQ1,thisIndexInInnerBlockQ2,thisInnerBlockQ1InInnerBlockQ2,outerBitQ1,outerBitQ2) 
+                thisIndexInInnerBlockQ1,thisIndexInInnerBlockQ2,thisInnerBlockQ1InInnerBlockQ2,outerBitQ1,outerBitQ2)
 # endif
     {
 # ifdef _OPENMP
@@ -649,7 +647,7 @@ void compressPairVectorForTwoQubitDepolarise(Qureg qureg, const int targetQubit,
         // thisTask iterates over half the elements in this process' chunk of the density matrix
         // treat this as iterating over all columns, then iterating over half the values
         // within one column.
-        // If this function has been called, this process' chunk contains half an 
+        // If this function has been called, this process' chunk contains half an
         // outer block or less
         for (thisTask=0; thisTask<numTasks; thisTask++) {
             // we want to process all columns in the density matrix,
@@ -680,9 +678,9 @@ void compressPairVectorForTwoQubitDepolarise(Qureg qureg, const int targetQubit,
             // of the inner block as well (we want to dephase |0><0| and |1><1| only)
             thisIndex += outerBitQ2*(sizeInnerQuarterBlockQ2<<1);
 
-            // NOTE: at this point thisIndex should be the index of the element we want to 
-            // dephase in the chunk of the state vector on this process, in the 
-            // density matrix representation. 
+            // NOTE: at this point thisIndex should be the index of the element we want to
+            // dephase in the chunk of the state vector on this process, in the
+            // density matrix representation.
             // thisTask is the index of the pair element in pairStateVec
 
             // state[thisIndex] = (1-depolLevel)*state[thisIndex] + depolLevel*(state[thisIndex]
@@ -697,11 +695,11 @@ void compressPairVectorForTwoQubitDepolarise(Qureg qureg, const int targetQubit,
 void densmatr_mixDepolarising(Qureg qureg, const int targetQubit, qreal depolLevel) {
     if (depolLevel == 0)
         return;
-    
+
     int rankIsUpper; // rank is in the upper half of an outer block
     int pairRank; // rank of corresponding chunk
 
-    int useLocalDataOnly = densityMatrixBlockFitsInChunk(qureg.numAmpsPerChunk, 
+    int useLocalDataOnly = densityMatrixBlockFitsInChunk(qureg.numAmpsPerChunk,
             qureg.numQubitsRepresented, targetQubit);
 
     if (useLocalDataOnly){
@@ -710,9 +708,9 @@ void densmatr_mixDepolarising(Qureg qureg, const int targetQubit, qreal depolLev
         // pack data to send to my pair process into the first half of pairStateVec
         compressPairVectorForSingleQubitDepolarise(qureg, targetQubit);
 
-        rankIsUpper = chunkIsUpperInOuterBlock(qureg.chunkId, qureg.numAmpsPerChunk, targetQubit, 
+        rankIsUpper = chunkIsUpperInOuterBlock(qureg.chunkId, qureg.numAmpsPerChunk, targetQubit,
                 qureg.numQubitsRepresented);
-        pairRank = getChunkOuterBlockPairId(rankIsUpper, qureg.chunkId, qureg.numAmpsPerChunk, 
+        pairRank = getChunkOuterBlockPairId(rankIsUpper, qureg.chunkId, qureg.numAmpsPerChunk,
                 targetQubit, qureg.numQubitsRepresented);
 
         exchangePairStateVectorHalves(qureg, pairRank);
@@ -724,11 +722,11 @@ void densmatr_mixDepolarising(Qureg qureg, const int targetQubit, qreal depolLev
 void densmatr_mixDamping(Qureg qureg, const int targetQubit, qreal damping) {
     if (damping == 0)
         return;
-    
+
     int rankIsUpper; // rank is in the upper half of an outer block
     int pairRank; // rank of corresponding chunk
 
-    int useLocalDataOnly = densityMatrixBlockFitsInChunk(qureg.numAmpsPerChunk, 
+    int useLocalDataOnly = densityMatrixBlockFitsInChunk(qureg.numAmpsPerChunk,
             qureg.numQubitsRepresented, targetQubit);
 
     if (useLocalDataOnly){
@@ -737,9 +735,9 @@ void densmatr_mixDamping(Qureg qureg, const int targetQubit, qreal damping) {
         // pack data to send to my pair process into the first half of pairStateVec
         compressPairVectorForSingleQubitDepolarise(qureg, targetQubit);
 
-        rankIsUpper = chunkIsUpperInOuterBlock(qureg.chunkId, qureg.numAmpsPerChunk, targetQubit, 
+        rankIsUpper = chunkIsUpperInOuterBlock(qureg.chunkId, qureg.numAmpsPerChunk, targetQubit,
                 qureg.numQubitsRepresented);
-        pairRank = getChunkOuterBlockPairId(rankIsUpper, qureg.chunkId, qureg.numAmpsPerChunk, 
+        pairRank = getChunkOuterBlockPairId(rankIsUpper, qureg.chunkId, qureg.numAmpsPerChunk,
                 targetQubit, qureg.numQubitsRepresented);
 
         exchangePairStateVectorHalves(qureg, pairRank);
@@ -756,52 +754,52 @@ void densmatr_mixTwoQubitDepolarising(Qureg qureg, int qubit1, int qubit2, qreal
     int biggerQubit, smallerQubit;
 
     densmatr_mixTwoQubitDephasing(qureg, qubit1, qubit2, depolLevel);
-    
+
     qreal eta = 2/depolLevel;
-    qreal delta = eta - 1 - sqrt( (eta-1)*(eta-1) - 1 ); 
+    qreal delta = eta - 1 - sqrt( (eta-1)*(eta-1) - 1 );
     qreal gamma = 1+delta;
     gamma = 1/(gamma*gamma*gamma);
     const qreal GAMMA_PARTS_1_OR_2 = 1.0;
     // TODO -- test delta too small
-    /*   
+    /*
     if (fabs(4*delta*(1+delta)*gamma-depolLevel)>1e-5){
         printf("Numerical error in delta; for small error rates try Taylor expansion.\n");
         exit(1);
     }
     */
-    
+
     biggerQubit = qubit1 > qubit2 ? qubit1 : qubit2;
     smallerQubit = qubit1 < qubit2 ? qubit1 : qubit2;
     int useLocalDataOnlyBigQubit, useLocalDataOnlySmallQubit;
 
-    useLocalDataOnlyBigQubit = densityMatrixBlockFitsInChunk(qureg.numAmpsPerChunk, 
+    useLocalDataOnlyBigQubit = densityMatrixBlockFitsInChunk(qureg.numAmpsPerChunk,
         qureg.numQubitsRepresented, biggerQubit);
     if (useLocalDataOnlyBigQubit){
         // does parts 1, 2 and 3 locally in one go
         densmatr_mixTwoQubitDepolarisingLocal(qureg, qubit1, qubit2, delta, gamma);
     } else {
-        useLocalDataOnlySmallQubit = densityMatrixBlockFitsInChunk(qureg.numAmpsPerChunk, 
+        useLocalDataOnlySmallQubit = densityMatrixBlockFitsInChunk(qureg.numAmpsPerChunk,
             qureg.numQubitsRepresented, smallerQubit);
         if (useLocalDataOnlySmallQubit){
             // do part 1 locally
             densmatr_mixTwoQubitDepolarisingLocalPart1(qureg, smallerQubit, biggerQubit, delta);
-            
+
             // do parts 2 and 3 distributed (if part 2 is distributed part 3 is also distributed)
             // part 2 will be distributed and the value of the small qubit won't matter
             compressPairVectorForTwoQubitDepolarise(qureg, smallerQubit, biggerQubit);
-            rankIsUpperBiggerQubit = chunkIsUpperInOuterBlock(qureg.chunkId, qureg.numAmpsPerChunk, biggerQubit, 
+            rankIsUpperBiggerQubit = chunkIsUpperInOuterBlock(qureg.chunkId, qureg.numAmpsPerChunk, biggerQubit,
                     qureg.numQubitsRepresented);
-            pairRank = getChunkOuterBlockPairId(rankIsUpperBiggerQubit, qureg.chunkId, qureg.numAmpsPerChunk, 
+            pairRank = getChunkOuterBlockPairId(rankIsUpperBiggerQubit, qureg.chunkId, qureg.numAmpsPerChunk,
                     biggerQubit, qureg.numQubitsRepresented);
 
             exchangePairStateVectorHalves(qureg, pairRank);
             densmatr_mixTwoQubitDepolarisingDistributed(qureg, smallerQubit, biggerQubit, delta, GAMMA_PARTS_1_OR_2);
-            
+
             // part 3 will be distributed but involve rearranging for the smaller qubit
             compressPairVectorForTwoQubitDepolarise(qureg, smallerQubit, biggerQubit);
-            rankIsUpperBiggerQubit = chunkIsUpperInOuterBlock(qureg.chunkId, qureg.numAmpsPerChunk, biggerQubit, 
+            rankIsUpperBiggerQubit = chunkIsUpperInOuterBlock(qureg.chunkId, qureg.numAmpsPerChunk, biggerQubit,
                     qureg.numQubitsRepresented);
-            pairRank = getChunkOuterBlockPairId(rankIsUpperBiggerQubit, qureg.chunkId, qureg.numAmpsPerChunk, 
+            pairRank = getChunkOuterBlockPairId(rankIsUpperBiggerQubit, qureg.chunkId, qureg.numAmpsPerChunk,
                     biggerQubit, qureg.numQubitsRepresented);
 
             exchangePairStateVectorHalves(qureg, pairRank);
@@ -810,9 +808,9 @@ void densmatr_mixTwoQubitDepolarising(Qureg qureg, int qubit1, int qubit2, qreal
             // do part 1, 2 and 3 distributed
             // part 1
             compressPairVectorForTwoQubitDepolarise(qureg, smallerQubit, biggerQubit);
-            rankIsUpperSmallerQubit = chunkIsUpperInOuterBlock(qureg.chunkId, qureg.numAmpsPerChunk, smallerQubit, 
+            rankIsUpperSmallerQubit = chunkIsUpperInOuterBlock(qureg.chunkId, qureg.numAmpsPerChunk, smallerQubit,
                     qureg.numQubitsRepresented);
-            pairRank = getChunkOuterBlockPairId(rankIsUpperSmallerQubit, qureg.chunkId, qureg.numAmpsPerChunk, 
+            pairRank = getChunkOuterBlockPairId(rankIsUpperSmallerQubit, qureg.chunkId, qureg.numAmpsPerChunk,
                     smallerQubit, qureg.numQubitsRepresented);
 
             exchangePairStateVectorHalves(qureg, pairRank);
@@ -820,9 +818,9 @@ void densmatr_mixTwoQubitDepolarising(Qureg qureg, int qubit1, int qubit2, qreal
 
             // part 2
             compressPairVectorForTwoQubitDepolarise(qureg, smallerQubit, biggerQubit);
-            rankIsUpperBiggerQubit = chunkIsUpperInOuterBlock(qureg.chunkId, qureg.numAmpsPerChunk, biggerQubit, 
+            rankIsUpperBiggerQubit = chunkIsUpperInOuterBlock(qureg.chunkId, qureg.numAmpsPerChunk, biggerQubit,
                     qureg.numQubitsRepresented);
-            pairRank = getChunkOuterBlockPairId(rankIsUpperBiggerQubit, qureg.chunkId, qureg.numAmpsPerChunk, 
+            pairRank = getChunkOuterBlockPairId(rankIsUpperBiggerQubit, qureg.chunkId, qureg.numAmpsPerChunk,
                     biggerQubit, qureg.numQubitsRepresented);
 
             exchangePairStateVectorHalves(qureg, pairRank);
@@ -830,7 +828,7 @@ void densmatr_mixTwoQubitDepolarising(Qureg qureg, int qubit1, int qubit2, qreal
 
             // part 3
             compressPairVectorForTwoQubitDepolarise(qureg, smallerQubit, biggerQubit);
-            pairRank = getChunkOuterBlockPairIdForPart3(rankIsUpperSmallerQubit, rankIsUpperBiggerQubit, 
+            pairRank = getChunkOuterBlockPairIdForPart3(rankIsUpperSmallerQubit, rankIsUpperBiggerQubit,
                     qureg.chunkId, qureg.numAmpsPerChunk, smallerQubit, biggerQubit, qureg.numQubitsRepresented);
             exchangePairStateVectorHalves(qureg, pairRank);
             densmatr_mixTwoQubitDepolarisingDistributed(qureg, smallerQubit, biggerQubit, delta, gamma);
@@ -846,7 +844,7 @@ void statevec_compactUnitary(Qureg qureg, const int targetQubit, Complex alpha, 
     int useLocalDataOnly = halfMatrixBlockFitsInChunk(qureg.numAmpsPerChunk, targetQubit);
     Complex rot1, rot2;
 
-    // rank's chunk is in upper half of block 
+    // rank's chunk is in upper half of block
     int rankIsUpper;
     int pairRank; // rank of corresponding chunk
 
@@ -861,7 +859,7 @@ void statevec_compactUnitary(Qureg qureg, const int targetQubit, Complex alpha, 
         // get corresponding values from my pair
         exchangeStateVectors(qureg, pairRank);
 
-        // this rank's values are either in the upper of lower half of the block. 
+        // this rank's values are either in the upper of lower half of the block.
         // send values to compactUnitaryDistributed in the correct order
         if (rankIsUpper){
             statevec_compactUnitaryDistributed(qureg,rot1,rot2,
@@ -883,7 +881,7 @@ void statevec_unitary(Qureg qureg, const int targetQubit, ComplexMatrix2 u)
     int useLocalDataOnly = halfMatrixBlockFitsInChunk(qureg.numAmpsPerChunk, targetQubit);
     Complex rot1, rot2;
 
-    // rank's chunk is in upper half of block 
+    // rank's chunk is in upper half of block
     int rankIsUpper;
     int pairRank; // rank of corresponding chunk
 
@@ -898,7 +896,7 @@ void statevec_unitary(Qureg qureg, const int targetQubit, ComplexMatrix2 u)
         // get corresponding values from my pair
         exchangeStateVectors(qureg, pairRank);
 
-        // this rank's values are either in the upper of lower half of the block. 
+        // this rank's values are either in the upper of lower half of the block.
         // send values to compactUnitaryDistributed in the correct order
         if (rankIsUpper){
             statevec_unitaryDistributed(qureg,rot1,rot2,
@@ -922,7 +920,7 @@ void statevec_controlledCompactUnitary(Qureg qureg, const int controlQubit, cons
     int useLocalDataOnly = halfMatrixBlockFitsInChunk(qureg.numAmpsPerChunk, targetQubit);
     Complex rot1, rot2;
 
-    // rank's chunk is in upper half of block 
+    // rank's chunk is in upper half of block
     int rankIsUpper;
     int pairRank; // rank of corresponding chunk
 
@@ -954,14 +952,14 @@ void statevec_controlledCompactUnitary(Qureg qureg, const int controlQubit, cons
     }
 }
 
-void statevec_controlledUnitary(Qureg qureg, const int controlQubit, const int targetQubit, 
+void statevec_controlledUnitary(Qureg qureg, const int controlQubit, const int targetQubit,
         ComplexMatrix2 u)
 {
     // flag to require memory exchange. 1: an entire block fits on one rank, 0: at most half a block fits on one rank
     int useLocalDataOnly = halfMatrixBlockFitsInChunk(qureg.numAmpsPerChunk, targetQubit);
     Complex rot1, rot2;
 
-    // rank's chunk is in upper half of block 
+    // rank's chunk is in upper half of block
     int rankIsUpper;
     int pairRank; // rank of corresponding chunk
 
@@ -999,7 +997,7 @@ void statevec_multiControlledUnitary(Qureg qureg, long long int ctrlQubitsMask, 
     int useLocalDataOnly = halfMatrixBlockFitsInChunk(qureg.numAmpsPerChunk, targetQubit);
     Complex rot1, rot2;
 
-    // rank's chunk is in upper half of block 
+    // rank's chunk is in upper half of block
     int rankIsUpper;
     int pairRank; // rank of corresponding chunk
 
@@ -1035,7 +1033,7 @@ void statevec_pauliX(Qureg qureg, const int targetQubit)
     // flag to require memory exchange. 1: an entire block fits on one rank, 0: at most half a block fits on one rank
     int useLocalDataOnly = halfMatrixBlockFitsInChunk(qureg.numAmpsPerChunk, targetQubit);
 
-    // rank's chunk is in upper half of block 
+    // rank's chunk is in upper half of block
     int rankIsUpper;
     int pairRank; // rank of corresponding chunk
 
@@ -1061,7 +1059,7 @@ void statevec_controlledNot(Qureg qureg, const int controlQubit, const int targe
 {
     // flag to require memory exchange. 1: an entire block fits on one rank, 0: at most half a block fits on one rank
     int useLocalDataOnly = halfMatrixBlockFitsInChunk(qureg.numAmpsPerChunk, targetQubit);
-    int rankIsUpper; 	// rank's chunk is in upper half of block 
+    int rankIsUpper; 	// rank's chunk is in upper half of block
     int pairRank; 		// rank of corresponding chunk
 
     if (useLocalDataOnly){
@@ -1087,12 +1085,12 @@ void statevec_controlledNot(Qureg qureg, const int controlQubit, const int targe
 }
 
 void statevec_pauliY(Qureg qureg, const int targetQubit)
-{	
+{
 	int conjFac = 1;
 
     // flag to require memory exchange. 1: an entire block fits on one rank, 0: at most half a block fits on one rank
     int useLocalDataOnly = halfMatrixBlockFitsInChunk(qureg.numAmpsPerChunk, targetQubit);
-    int rankIsUpper;	// rank's chunk is in upper half of block 
+    int rankIsUpper;	// rank's chunk is in upper half of block
     int pairRank; 		// rank of corresponding chunk
 
     if (useLocalDataOnly){
@@ -1112,12 +1110,12 @@ void statevec_pauliY(Qureg qureg, const int targetQubit)
 }
 
 void statevec_pauliYConj(Qureg qureg, const int targetQubit)
-{	
+{
 	int conjFac = -1;
 
     // flag to require memory exchange. 1: an entire block fits on one rank, 0: at most half a block fits on one rank
     int useLocalDataOnly = halfMatrixBlockFitsInChunk(qureg.numAmpsPerChunk, targetQubit);
-    int rankIsUpper;	// rank's chunk is in upper half of block 
+    int rankIsUpper;	// rank's chunk is in upper half of block
     int pairRank; 		// rank of corresponding chunk
 
     if (useLocalDataOnly){
@@ -1142,7 +1140,7 @@ void statevec_controlledPauliY(Qureg qureg, const int controlQubit, const int ta
 
     // flag to require memory exchange. 1: an entire block fits on one rank, 0: at most half a block fits on one rank
     int useLocalDataOnly = halfMatrixBlockFitsInChunk(qureg.numAmpsPerChunk, targetQubit);
-    int rankIsUpper; 	// rank's chunk is in upper half of block 
+    int rankIsUpper; 	// rank's chunk is in upper half of block
     int pairRank; 		// rank of corresponding chunk
 
     if (useLocalDataOnly){
@@ -1175,7 +1173,7 @@ void statevec_controlledPauliYConj(Qureg qureg, const int controlQubit, const in
 
     // flag to require memory exchange. 1: an entire block fits on one rank, 0: at most half a block fits on one rank
     int useLocalDataOnly = halfMatrixBlockFitsInChunk(qureg.numAmpsPerChunk, targetQubit);
-    int rankIsUpper; 	// rank's chunk is in upper half of block 
+    int rankIsUpper; 	// rank's chunk is in upper half of block
     int pairRank; 		// rank of corresponding chunk
 
     if (useLocalDataOnly){
@@ -1207,7 +1205,7 @@ void statevec_hadamard(Qureg qureg, const int targetQubit)
     // flag to require memory exchange. 1: an entire block fits on one rank, 0: at most half a block fits on one rank
     int useLocalDataOnly = halfMatrixBlockFitsInChunk(qureg.numAmpsPerChunk, targetQubit);
 
-    // rank's chunk is in upper half of block 
+    // rank's chunk is in upper half of block
     int rankIsUpper;
     int pairRank; // rank of corresponding chunk
 
@@ -1242,7 +1240,7 @@ void statevec_hadamard(Qureg qureg, const int targetQubit)
  * When calculating probability of a bit q being zero,
  * sum up 2^q values, then skip 2^q values, etc. This function finds if an entire chunk
  * is in the range of values to be skipped
- * 
+ *
  * @param[in] chunkId id of chunk in state vector
  * @param[in] chunkSize number of amps in chunk
  * @param[in] measureQubi qubit being measured
@@ -1274,24 +1272,24 @@ qreal statevec_calcProbOfOutcome(Qureg qureg, const int measureQubit, int outcom
 }
 
 qreal densmatr_calcProbOfOutcome(Qureg qureg, const int measureQubit, int outcome) {
-	
+
 	qreal zeroProb = densmatr_findProbabilityOfZeroLocal(qureg, measureQubit);
-	
+
 	qreal outcomeProb;
 	MPI_Allreduce(&zeroProb, &outcomeProb, 1, MPI_QuEST_REAL, MPI_SUM, MPI_COMM_WORLD);
 	if (outcome == 1)
 		outcomeProb = 1.0 - outcomeProb;
-	
+
 	return outcomeProb;
 }
 
 qreal densmatr_calcPurity(Qureg qureg) {
-    
+
     qreal localPurity = densmatr_calcPurityLocal(qureg);
-        
+
     qreal globalPurity;
     MPI_Allreduce(&localPurity, &globalPurity, 1, MPI_QuEST_REAL, MPI_SUM, MPI_COMM_WORLD);
-    
+
     return globalPurity;
 }
 
@@ -1303,12 +1301,12 @@ void statevec_collapseToKnownProbOutcome(Qureg qureg, const int measureQubit, in
     } else {
         if (!isChunkToSkipInFindPZero(qureg.chunkId, qureg.numAmpsPerChunk, measureQubit)){
             // chunk has amps for q=0
-            if (outcome==0) statevec_collapseToKnownProbOutcomeDistributedRenorm(qureg, measureQubit, 
+            if (outcome==0) statevec_collapseToKnownProbOutcomeDistributedRenorm(qureg, measureQubit,
                     totalStateProb);
             else statevec_collapseToOutcomeDistributedSetZero(qureg);
         } else {
             // chunk has amps for q=1
-            if (outcome==1) statevec_collapseToKnownProbOutcomeDistributedRenorm(qureg, measureQubit, 
+            if (outcome==1) statevec_collapseToKnownProbOutcomeDistributedRenorm(qureg, measureQubit,
                     totalStateProb);
             else statevec_collapseToOutcomeDistributedSetZero(qureg);
         }
@@ -1317,7 +1315,7 @@ void statevec_collapseToKnownProbOutcome(Qureg qureg, const int measureQubit, in
 
 void seedQuESTDefault(){
     // init MT random number generator with three keys -- time and pid
-    // for the MPI version, it is ok that all procs will get the same seed as random numbers will only be 
+    // for the MPI version, it is ok that all procs will get the same seed as random numbers will only be
     // used by the master process
 
     unsigned long int key[2];
@@ -1328,7 +1326,7 @@ void seedQuESTDefault(){
     init_by_array(key, 2);
 }
 
-/** returns -1 if this node contains no amplitudes where qb1 and qb2 
+/** returns -1 if this node contains no amplitudes where qb1 and qb2
  * have opposite parity, otherwise returns the global index of one
  * of such contained amplitudes (not necessarily the first)
  */
@@ -1336,29 +1334,29 @@ long long int getGlobalIndOfOddParityInChunk(Qureg qureg, int qb1, int qb2) {
     long long int chunkStartInd = qureg.numAmpsPerChunk * qureg.chunkId;
     long long int chunkEndInd = chunkStartInd + qureg.numAmpsPerChunk; // exclusive
     long long int oddParityInd;
-    
+
     if (extractBit(qb1, chunkStartInd) != extractBit(qb2, chunkStartInd))
         return chunkStartInd;
-    
+
     oddParityInd = flipBit(chunkStartInd, qb1);
     if (oddParityInd >= chunkStartInd && oddParityInd < chunkEndInd)
         return oddParityInd;
-        
+
     oddParityInd = flipBit(chunkStartInd, qb2);
     if (oddParityInd >= chunkStartInd && oddParityInd < chunkEndInd)
         return oddParityInd;
-    
+
     return -1;
 }
 
 
 void statevec_swapQubitAmps(Qureg qureg, int qb1, int qb2) {
-    
-    // perform locally if possible 
+
+    // perform locally if possible
     int qbBig = (qb1 > qb2)? qb1 : qb2;
     if (halfMatrixBlockFitsInChunk(qureg.numAmpsPerChunk, qbBig))
         return statevec_swapQubitAmpsLocal(qureg, qb1, qb2);
-        
+
     // do nothing if this node contains no amplitudes to swap
     long long int oddParityGlobalInd = getGlobalIndOfOddParityInChunk(qureg, qb1, qb2);
     if (oddParityGlobalInd == -1)
@@ -1373,19 +1371,19 @@ void statevec_swapQubitAmps(Qureg qureg, int qb1, int qb2) {
 /** This calls swapQubitAmps only when it would involve a distributed communication;
  * if the qubit chunks already fit in the node, it operates the unitary direct.
  * Note the order of q1 and q2 in the call to twoQubitUnitaryLocal is important.
- * 
- * @TODO: refactor so that the 'swap back' isn't performed; instead the qubit locations 
+ *
+ * @TODO: refactor so that the 'swap back' isn't performed; instead the qubit locations
  * are updated.
- * @TODO: the double swap (q1,q2 to 0,1) may be possible simultaneously by a bespoke 
+ * @TODO: the double swap (q1,q2 to 0,1) may be possible simultaneously by a bespoke
  * swap routine.
  */
 void statevec_multiControlledTwoQubitUnitary(Qureg qureg, long long int ctrlMask, const int q1, const int q2, ComplexMatrix4 u) {
     int q1FitsInNode = halfMatrixBlockFitsInChunk(qureg.numAmpsPerChunk, q1);
     int q2FitsInNode = halfMatrixBlockFitsInChunk(qureg.numAmpsPerChunk, q2);
-    
+
     if (q1FitsInNode && q2FitsInNode) {
         statevec_multiControlledTwoQubitUnitaryLocal(qureg, ctrlMask, q1, q2, u);
-        
+
     } else if (q1FitsInNode) {
         int qSwap = (q1 > 0)? q1-1 : q1+1;
         statevec_swapQubitAmps(qureg, q2, qSwap);
@@ -1397,7 +1395,7 @@ void statevec_multiControlledTwoQubitUnitary(Qureg qureg, long long int ctrlMask
         statevec_swapQubitAmps(qureg, q1, qSwap);
         statevec_multiControlledTwoQubitUnitaryLocal(qureg, ctrlMask, qSwap, q2, u);
         statevec_swapQubitAmps(qureg, q1, qSwap);
-        
+
     } else {
         int swap1 = 0;
         int swap2 = 1;
@@ -1413,20 +1411,20 @@ void statevec_multiControlledTwoQubitUnitary(Qureg qureg, long long int ctrlMask
  * if the qubit chunks already fit in the node, it operates the unitary direct.
  * It is already gauranteed here that all target qubits can fit on each node (this is
  * validated in the front-end)
- * 
- * @TODO: refactor so that the 'swap back' isn't performed; instead the qubit locations 
+ *
+ * @TODO: refactor so that the 'swap back' isn't performed; instead the qubit locations
  * are updated.
  */
 void statevec_multiControlledMultiQubitUnitary(Qureg qureg, long long int ctrlMask, int* targs, const int numTargs, ComplexMatrixN u) {
 
     // bit mask of target qubits (for quick collision checking)
     long long int targMask = getQubitBitMask(targs, numTargs);
-    
+
     // find lowest qubit available for swapping (isn't in targs)
     int freeQb=0;
     while (maskContainsBit(targMask, freeQb))
         freeQb++;
-        
+
     // assign indices of where each target will be swapped to (else itself)
     int swapTargs[numTargs];
     for (int t=0; t<numTargs; t++) {
@@ -1435,27 +1433,27 @@ void statevec_multiControlledMultiQubitUnitary(Qureg qureg, long long int ctrlMa
         else {
             // mark swap
             swapTargs[t] = freeQb;
-            
+
             // update ctrlMask if swapped-out qubit was a control
             if (maskContainsBit(ctrlMask, swapTargs[t]))
                 ctrlMask = flipBit(flipBit(ctrlMask, swapTargs[t]), targs[t]); // swap targ and ctrl
-            
+
             // locate next available on-chunk qubit
             freeQb++;
             while (maskContainsBit(targMask, freeQb))
                 freeQb++;
         }
     }
-    
-    // perform swaps as necessary 
+
+    // perform swaps as necessary
     for (int t=0; t<numTargs; t++)
         if (swapTargs[t] != targs[t])
             statevec_swapQubitAmps(qureg, targs[t], swapTargs[t]);
-    
+
     // all target qubits have now been swapped into local memory
     statevec_multiControlledMultiQubitUnitaryLocal(qureg, ctrlMask, swapTargs, numTargs, u);
-    
-    // undo swaps 
+
+    // undo swaps
     for (int t=0; t<numTargs; t++)
         if (swapTargs[t] != targs[t])
             statevec_swapQubitAmps(qureg, targs[t], swapTargs[t]);
