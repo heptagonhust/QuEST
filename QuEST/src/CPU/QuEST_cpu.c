@@ -2105,6 +2105,7 @@ void statevec_compactUnitaryDistributed (Qureg qureg,
     const long long int numTasks=qureg.numAmpsPerChunk;
     if(numTasks >= 4){
         statevec_compactUnitaryDistributedSIMD(qureg,rot1,rot2,stateVecUp,stateVecLo,stateVecOut);
+        return ;
     }
 
     qreal rot1Real=rot1.real, rot1Imag=rot1.imag;
