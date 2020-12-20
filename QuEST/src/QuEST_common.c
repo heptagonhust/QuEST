@@ -251,48 +251,48 @@ void statevec_phaseShift(Qureg qureg, const int targetQubit, qreal angle) {
     Complex term; 
     term.real = cos(angle); 
     term.imag = sin(angle);
-    // statevec_phaseShiftByTerm(qureg, targetQubit, term);
-    statevec_phaseShiftByTermSmall(qureg, targetQubit, term);
+    statevec_phaseShiftByTerm(qureg, targetQubit, term);
+    // statevec_phaseShiftByTermSmall(qureg, targetQubit, term);
 }
 
 void statevec_pauliZ(Qureg qureg, const int targetQubit) {
     Complex term; 
     term.real = -1;
     term.imag =  0;
-    // statevec_phaseShiftByTerm(qureg, targetQubit, term);
-    statevec_phaseShiftByTermSmall(qureg, targetQubit, term);
+    statevec_phaseShiftByTerm(qureg, targetQubit, term);
+    // statevec_phaseShiftByTermSmall(qureg, targetQubit, term);
 }
 
 void statevec_sGate(Qureg qureg, const int targetQubit) {
     Complex term; 
     term.real = 0;
     term.imag = 1;
-    // statevec_phaseShiftByTerm(qureg, targetQubit, term);
-    statevec_phaseShiftByTermSmall(qureg, targetQubit, term);
+    statevec_phaseShiftByTerm(qureg, targetQubit, term);
+    // statevec_phaseShiftByTermSmall(qureg, targetQubit, term);
 } 
 
 void statevec_tGate(Qureg qureg, const int targetQubit) {
     Complex term; 
     term.real = 1/sqrt(2);
     term.imag = 1/sqrt(2);
-    // statevec_phaseShiftByTerm(qureg, targetQubit, term);
-    statevec_phaseShiftByTermSmall(qureg, targetQubit, term);
+    statevec_phaseShiftByTerm(qureg, targetQubit, term);
+    // statevec_phaseShiftByTermSmall(qureg, targetQubit, term);
 }
 
 void statevec_sGateConj(Qureg qureg, const int targetQubit) {
     Complex term; 
     term.real =  0;
     term.imag = -1;
-    // statevec_phaseShiftByTerm(qureg, targetQubit, term);
-    statevec_phaseShiftByTermSmall(qureg, targetQubit, term);
+    statevec_phaseShiftByTerm(qureg, targetQubit, term);
+    // statevec_phaseShiftByTermSmall(qureg, targetQubit, term);
 } 
 
 void statevec_tGateConj(Qureg qureg, const int targetQubit) {
     Complex term; 
     term.real =  1/sqrt(2);
     term.imag = -1/sqrt(2);
-    // statevec_phaseShiftByTerm(qureg, targetQubit, term);
-    statevec_phaseShiftByTermSmall(qureg, targetQubit, term);
+    statevec_phaseShiftByTerm(qureg, targetQubit, term);
+    // statevec_phaseShiftByTermSmall(qureg, targetQubit, term);
 }
 
 void statevec_rotateX(Qureg qureg, const int rotQubit, qreal angle){
