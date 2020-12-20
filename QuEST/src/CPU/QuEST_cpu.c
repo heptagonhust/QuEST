@@ -2103,9 +2103,9 @@ void statevec_compactUnitaryDistributed (Qureg qureg,
     qreal   stateRealUp,stateRealLo,stateImagUp,stateImagLo;
     long long int thisTask;
     const long long int numTasks=qureg.numAmpsPerChunk;
-    if(numTasks >= 4){
-        statevec_compactUnitaryDistributedSIMD(qureg,rot1,rot2,stateVecUp,stateVecLo,stateVecOut);
-    }
+    // if(numTasks >= 4){
+    //     statevec_compactUnitaryDistributedSIMD(qureg,rot1,rot2,stateVecUp,stateVecLo,stateVecOut);
+    // }
 
     qreal rot1Real=rot1.real, rot1Imag=rot1.imag;
     qreal rot2Real=rot2.real, rot2Imag=rot2.imag;
@@ -3578,10 +3578,10 @@ void statevec_hadamardDistributed(Qureg qureg,
     long long int thisTask;
     const long long int numTasks=qureg.numAmpsPerChunk;
 
-    if(numTasks >= 4){
-        statevec_hadamardDistributedSIMD(qureg,stateVecUp,stateVecLo,stateVecOut,updateUpper);
-        return;
-    }
+    // if(numTasks >= 4){
+    //     statevec_hadamardDistributedSIMD(qureg,stateVecUp,stateVecLo,stateVecOut,updateUpper);
+    //     return;
+    // }
 
     int sign;
     if (updateUpper) sign=1;
