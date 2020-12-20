@@ -1647,11 +1647,11 @@ void statevec_compactUnitaryLocalSmall (Qureg qureg, const int targetQubit, Comp
     qreal stateRealUp,stateRealLo,stateImagUp,stateImagLo;
 
     const long long int sizeTask = (1LL << targetQubit);
-    if(sizeTask >= 4){
-        statevec_compactUnitaryLocalSIMD(qureg,targetQubit,alpha,beta);
-        //printf("simd");
-        return;
-    }
+    // if(sizeTask >= 4){
+    //     statevec_compactUnitaryLocalSIMD(qureg,targetQubit,alpha,beta);
+    //     //printf("simd");
+    //     return;
+    // }
 
     const long long int numTasks = (qureg.numAmpsPerChunk>>(1 + targetQubit)) ;
     long long thisTask;
@@ -2259,11 +2259,11 @@ void statevec_controlledCompactUnitaryLocalSmall (Qureg qureg, const int control
     long long int thisTask;
 
     const long long int sizeTask = ((targetQubit > controlQubit) ? (1LL << controlQubit) : (1LL << targetQubit));
-    if(sizeTask >= 4){
-        statevec_controlledCompactUnitaryLocalSIMD(qureg,controlQubit,targetQubit,alpha,beta);
-        //printf("simd");
-        return;
-    }
+    // if(sizeTask >= 4){
+    //     statevec_controlledCompactUnitaryLocalSIMD(qureg,controlQubit,targetQubit,alpha,beta);
+    //     //printf("simd");
+    //     return;
+    // }
 
     const long long int numTasks = ((targetQubit > controlQubit) ? (1LL << (targetQubit - controlQubit - 1)) : (1LL << (controlQubit - targetQubit - 1)));
     // const long long int chunkSize=qureg.numAmpsPerChunk;
@@ -3421,11 +3421,11 @@ void statevec_hadamardLocalSmall(Qureg qureg, const int targetQubit)
 
     qreal stateRealUp,stateRealLo,stateImagUp,stateImagLo;
     const long long int sizeTask = (1LL << targetQubit);
-    if(sizeTask >= 4){
-        statevec_hadamardLocalSIMD(qureg,targetQubit);
-        //printf("simd");
-        return;
-    }
+    // if(sizeTask >= 4){
+    //     statevec_hadamardLocalSIMD(qureg,targetQubit);
+    //     //printf("simd");
+    //     return;
+    // }
 
     const long long int numTasks = (qureg.numAmpsPerChunk>>(1 + targetQubit)) ;
     long long thisTask;

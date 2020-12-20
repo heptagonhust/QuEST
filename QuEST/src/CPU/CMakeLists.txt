@@ -1,8 +1,10 @@
 if (DISTRIBUTED)
+    message (TRACE " DISTRIBUTED!")
     set(QuEST_SRC_CPU_ARCHITECTURE_DEPENDENT
         ${CMAKE_CURRENT_SOURCE_DIR}/QuEST_cpu_distributed.c
     )
 else()
+    message (TRACE " LOCAL!")
     set(QuEST_SRC_CPU_ARCHITECTURE_DEPENDENT
         ${CMAKE_CURRENT_SOURCE_DIR}/QuEST_cpu_local.c
     )
