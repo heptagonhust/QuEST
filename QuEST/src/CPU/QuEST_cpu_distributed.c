@@ -850,7 +850,7 @@ void statevec_compactUnitary(Qureg qureg, const int targetQubit, Complex alpha, 
 
     if (useLocalDataOnly){
         // all values required to update state vector lie in this rank
-        statevec_compactUnitaryLocal(qureg, targetQubit, alpha, beta);
+        statevec_compactUnitaryLocalSIMD(qureg, targetQubit, alpha, beta);
     } else {
         // need to get corresponding chunk of state vector from other rank
         rankIsUpper = chunkIsUpper(qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);
@@ -926,7 +926,7 @@ void statevec_controlledCompactUnitary(Qureg qureg, const int controlQubit, cons
 
     if (useLocalDataOnly){
         // all values required to update state vector lie in this rank
-        statevec_controlledCompactUnitaryLocal(qureg, controlQubit, targetQubit, alpha, beta);
+        statevec_controlledCompactUnitaryLocalSIMD(qureg, controlQubit, targetQubit, alpha, beta);
     } else {
         // need to get corresponding chunk of state vector from other rank
         rankIsUpper = chunkIsUpper(qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);
@@ -1211,7 +1211,7 @@ void statevec_hadamard(Qureg qureg, const int targetQubit)
 
     if (useLocalDataOnly){
         // all values required to update state vector lie in this rank
-        statevec_hadamardLocal(qureg, targetQubit);
+        statevec_hadamardLocalSIMD(qureg, targetQubit);
     } else {
         // need to get corresponding chunk of state vector from other rank
         rankIsUpper = chunkIsUpper(qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);
