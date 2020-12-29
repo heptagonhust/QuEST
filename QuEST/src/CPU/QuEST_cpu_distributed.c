@@ -926,7 +926,9 @@ void statevec_controlledCompactUnitary(Qureg qureg, const int controlQubit, cons
 
     if (useLocalDataOnly){
         // all values required to update state vector lie in this rank
-        statevec_controlledCompactUnitaryLocal(qureg, controlQubit, targetQubit, alpha, beta);
+        statevec_controlledCompactUnitaryLocalSmall(qureg, controlQubit, targetQubit, alpha, beta);
+        //statevec_controlledCompactUnitaryLocal(qureg, controlQubit, targetQubit, alpha, beta);
+
     } else {
         // need to get corresponding chunk of state vector from other rank
         rankIsUpper = chunkIsUpper(qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);

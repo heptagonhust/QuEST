@@ -2252,6 +2252,10 @@ void statevec_unitaryDistributed (Qureg qureg,
 void statevec_controlledCompactUnitaryLocalSmall (Qureg qureg, const int controlQubit, const int targetQubit,
         Complex alpha, Complex beta)
 {
+    if(targetQubit < controlQubit) {
+        statevec_controlledCompactUnitaryLocal(qureg,controlQubit,targetQubit,alpha,beta);
+        return ;
+    }
     long long int sizeBlock, sizeHalfBlock;
     long long int thisBlock, // current block
          indexUp,indexLo;    // current index and corresponding index in lower half block
@@ -2274,7 +2278,7 @@ void statevec_controlledCompactUnitaryLocalSmall (Qureg qureg, const int control
 
     // set dimensions
     sizeHalfBlock = 1LL << targetQubit;
-    sizeBlock     = ((targetQubit > controlQubit) ? (2LL * sizeHalfBlock) : (2LL << controlQubit));
+    sizeBlock = ((targetQubit > controlQubit) ? (2LL * sizeHalfBlock) : (2LL << controlQubit));
 
     // Can't use qureg.stateVec as a private OMP var
     qreal *stateVecReal = qureg.stateVec.real;
@@ -2297,9 +2301,12 @@ void statevec_controlledCompactUnitaryLocalSmall (Qureg qureg, const int control
             // for(indexUp = thisBlock * sizeBlock; indexUp < thisBlock * sizeBlock + sizeHalfBlock; ++indexUp) {
 
                 indexLo     = indexUp + sizeHalfBlock;
+             //   if(thisBlock != thisTask / sizeHalfBlock) exit(1);
+             //   if(indexUp != thisBlock*sizeBlock + thisTask%sizeHalfBlock) exit(2);
+             //   if(indexLo != indexUp + sizeHalfBlock) exit(3);
 
-                // controlBit = extractBit (controlQubit, indexUp+chunkId*chunkSize);
-                // if (controlBit){
+//                int controlBit = extractBit (controlQubit, indexUp+chunkId*chunkSize);
+//                if (controlBit){
                     // store current state vector values in temp variables
                     stateRealUp = stateVecReal[indexUp];
                     stateImagUp = stateVecImag[indexUp];
@@ -2318,7 +2325,7 @@ void statevec_controlledCompactUnitaryLocalSmall (Qureg qureg, const int control
                         + alphaReal*stateRealLo + alphaImag*stateImagLo;
                     stateVecImag[indexLo] = betaReal*stateImagUp + betaImag*stateRealUp
                         + alphaReal*stateImagLo - alphaImag*stateRealLo;
-                // }
+//                }
             }
         }
     }
