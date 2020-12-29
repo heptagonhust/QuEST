@@ -7,6 +7,7 @@ cmake_minimum_required(VERSION 3.1)
 
 # Project name
 project(QuEST_Project)
+add_compile_options(-std=gnu99)
 
 # -----------------------------------------------------------------------------
 # ----- USER OPTIONS ----------------------------------------------------------
