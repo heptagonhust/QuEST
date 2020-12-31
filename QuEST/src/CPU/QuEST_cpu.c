@@ -2252,7 +2252,7 @@ void statevec_unitaryDistributed (Qureg qureg,
 void statevec_controlledCompactUnitaryLocalSmall (Qureg qureg, const int controlQubit, const int targetQubit,
         Complex alpha, Complex beta)
 {
-    if(targetQubit < controlQubit) {
+    if((1LL<<controlQubit)>=qureg.numAmpsPerChunk) {
         statevec_controlledCompactUnitaryLocal(qureg,controlQubit,targetQubit,alpha,beta);
         return ;
     }
