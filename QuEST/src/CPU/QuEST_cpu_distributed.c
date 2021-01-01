@@ -1067,7 +1067,8 @@ void statevec_controlledNot(Qureg qureg, const int controlQubit, const int targe
 
     if (useLocalDataOnly){
         // all values required to update state vector lie in this rank
-        statevec_controlledNotLocal(qureg, controlQubit, targetQubit);
+        //statevec_controlledNotLocal(qureg, controlQubit, targetQubit);
+        statevec_controlledNotLocalSmall(qureg, controlQubit, targetQubit);
     } else {
         // need to get corresponding chunk of state vector from other rank
         rankIsUpper = chunkIsUpper(qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);
