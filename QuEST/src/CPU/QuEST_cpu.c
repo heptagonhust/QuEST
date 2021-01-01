@@ -2690,6 +2690,47 @@ void statevec_controlledUnitaryLocal(Qureg qureg, const int controlQubit, const 
     }
 
 }
+void statevec_controlledCompactUnitaryDistributedAll (Qureg qureg, const int controlQubit,
+        Complex rot1, Complex rot2,
+        ComplexArray stateVecUp,
+        ComplexArray stateVecLo,
+        ComplexArray stateVecOut)
+{
+    qreal   stateRealUp,stateRealLo,stateImagUp,stateImagLo;
+    long long int thisTask;
+    const long long int numTasks=qureg.numAmpsPerChunk;
+
+    qreal rot1Real=rot1.real, rot1Imag=rot1.imag;
+    qreal rot2Real=rot2.real, rot2Imag=rot2.imag;
+    qreal *stateVecRealUp=stateVecUp.real, *stateVecImagUp=stateVecUp.imag;
+    qreal *stateVecRealLo=stateVecLo.real, *stateVecImagLo=stateVecLo.imag;
+    qreal *stateVecRealOut=stateVecOut.real, *stateVecImagOut=stateVecOut.imag;
+
+# ifdef _OPENMP
+# pragma omp parallel \
+    shared   (stateVecRealUp,stateVecImagUp,stateVecRealLo,stateVecImagLo,stateVecRealOut,stateVecImagOut, \
+            rot1Real,rot1Imag, rot2Real,rot2Imag) \
+    private  (thisTask,stateRealUp,stateImagUp,stateRealLo,stateImagLo)
+# endif
+    {
+# ifdef _OPENMP
+# pragma omp for schedule (static)
+# endif
+        for (thisTask=0; thisTask<numTasks; thisTask++) {
+                // store current state vector values in temp variables
+                stateRealUp = stateVecRealUp[thisTask];
+                stateImagUp = stateVecImagUp[thisTask];
+
+                stateRealLo = stateVecRealLo[thisTask];
+                stateImagLo = stateVecImagLo[thisTask];
+
+                // state[indexUp] = alpha * state[indexUp] - conj(beta)  * state[indexLo]
+                stateVecRealOut[thisTask] = rot1Real*stateRealUp - rot1Imag*stateImagUp + rot2Real*stateRealLo + rot2Imag*stateImagLo;
+                stateVecImagOut[thisTask] = rot1Real*stateImagUp + rot1Imag*stateRealUp + rot2Real*stateImagLo - rot2Imag*stateRealLo;
+        }
+    }
+}
+
 
 /** Rotate a single qubit in the state vector of probability amplitudes, given two complex
  * numbers alpha and beta and a subset of the state vector with upper and lower block values
@@ -2709,7 +2750,12 @@ void statevec_controlledCompactUnitaryDistributed (Qureg qureg, const int contro
         ComplexArray stateVecLo,
         ComplexArray stateVecOut)
 {
-
+    if((1LL<<controlQubit)>=qureg.numAmpsPerChunk) {
+        if(extractBit(controlQubit,qureg.chunkId*qureg.numAmpsPerChunk)) {
+            statevec_controlledCompactUnitaryDistributedAll(qureg,controlQubit,rot1,rot2,stateVecUp,stateVecLo,stateVecOut);
+        }
+        return ;
+    }
     qreal   stateRealUp,stateRealLo,stateImagUp,stateImagLo;
     long long int thisTask;
     const long long int numTasks=qureg.numAmpsPerChunk;
@@ -2803,6 +2849,7 @@ void statevec_controlledCompactUnitaryDistributedSIMD (Qureg qureg, const int co
 # endif
         for(thisBlock=0; thisBlock<blockRange; thisBlock++){
             taskEnd = fmin(blockEnd,(thisBlock+1)*blockSize);
+
             for(thisTask=thisBlock*blockSize+halfBlockSize; thisTask<taskEnd; thisTask+=4){
                 stateRealUpSIMD = _mm256_loadu_pd(stateVecRealUp+thisTask);
                 stateImagUpSIMD = _mm256_loadu_pd(stateVecImagUp+thisTask);
