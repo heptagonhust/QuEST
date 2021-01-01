@@ -1041,7 +1041,8 @@ void statevec_pauliX(Qureg qureg, const int targetQubit)
 
     if (useLocalDataOnly){
         // all values required to update state vector lie in this rank
-        statevec_pauliXLocal(qureg, targetQubit);
+        // statevec_pauliXLocal(qureg, targetQubit);
+        statevec_pauliXLocalSmall(qureg, targetQubit);
     } else {
         // need to get corresponding chunk of state vector from other rank
         rankIsUpper = chunkIsUpper(qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);
