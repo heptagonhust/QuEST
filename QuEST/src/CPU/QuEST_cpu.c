@@ -3127,8 +3127,8 @@ void statevec_controlledNotLocalSmall(Qureg qureg, const int controlQubit, const
          indexUp,indexLo;    // current index and corresponding index in lower half block
 
     qreal stateRealUp,stateImagUp;
-    if((1LL<<targetQubit)>=qureg.numAmpsPerChunk) {
-        if(extractBit(targetQubit,qureg.chunkId*qureg.numAmpsPerChunk)) {
+    if((1LL<<controlQubit)>=qureg.numAmpsPerChunk) {
+        if(extractBit(controlQubit,qureg.chunkId*qureg.numAmpsPerChunk)) {
             statevec_controlledNotLocalAll(qureg,controlQubit,targetQubit);
         }
         return ;
