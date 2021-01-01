@@ -1148,7 +1148,8 @@ void statevec_controlledPauliY(Qureg qureg, const int controlQubit, const int ta
 
     if (useLocalDataOnly){
         // all values required to update state vector lie in this rank
-        statevec_controlledPauliYLocal(qureg, controlQubit, targetQubit, conjFac);
+        // statevec_controlledPauliYLocal(qureg, controlQubit, targetQubit, conjFac);
+        statevec_controlledPauliYLocalSmall(qureg, controlQubit, targetQubit, conjFac);
     } else {
         // need to get corresponding chunk of state vector from other rank
         rankIsUpper = chunkIsUpper(qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);
@@ -1181,7 +1182,8 @@ void statevec_controlledPauliYConj(Qureg qureg, const int controlQubit, const in
 
     if (useLocalDataOnly){
         // all values required to update state vector lie in this rank
-        statevec_controlledPauliYLocal(qureg, controlQubit, targetQubit, conjFac);
+        // statevec_controlledPauliYLocal(qureg, controlQubit, targetQubit, conjFac);
+        statevec_controlledPauliYLocalSmall(qureg, controlQubit, targetQubit, conjFac);
     } else {
         // need to get corresponding chunk of state vector from other rank
         rankIsUpper = chunkIsUpper(qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);

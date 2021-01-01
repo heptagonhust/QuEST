@@ -3397,9 +3397,61 @@ void statevec_pauliYDistributed(Qureg qureg,
         }
     }
 }
+void statevec_controlledPauliYLocalAll(Qureg qureg, const int controlQubit, const int targetQubit, const int conjFac) {
+    long long int sizeBlock, sizeHalfBlock;
+    long long int thisBlock, // current block
+         indexUp,indexLo;    // current index and corresponding index in lower half block
+
+    qreal stateRealUp,stateImagUp;
+    long long int thisTask;
+    const long long int numTasks=qureg.numAmpsPerChunk>>1;
+    const long long int chunkSize=qureg.numAmpsPerChunk;
+    const long long int chunkId=qureg.chunkId;
+
+    int controlBit;
+
+    // set dimensions
+    sizeHalfBlock = 1LL << targetQubit;
+    sizeBlock     = 2LL * sizeHalfBlock;
+
+    // Can't use qureg.stateVec as a private OMP var
+    qreal *stateVecReal = qureg.stateVec.real;
+    qreal *stateVecImag = qureg.stateVec.imag;
+
+# ifdef _OPENMP
+# pragma omp parallel \
+    shared   (sizeBlock,sizeHalfBlock, stateVecReal,stateVecImag) \
+    private  (thisTask,thisBlock ,indexUp,indexLo, stateRealUp,stateImagUp,controlBit)
+# endif
+    {
+# ifdef _OPENMP
+# pragma omp for schedule (static)
+# endif
+        for (thisTask=0; thisTask<numTasks; thisTask++) {
+            thisBlock   = thisTask / sizeHalfBlock;
+            indexUp     = thisBlock*sizeBlock + thisTask%sizeHalfBlock;
+            indexLo     = indexUp + sizeHalfBlock;
+
+                stateRealUp = stateVecReal[indexUp];
+                stateImagUp = stateVecImag[indexUp];
+
+                // update under +-{{0, -i}, {i, 0}}
+                stateVecReal[indexUp] = conjFac * stateVecImag[indexLo];
+                stateVecImag[indexUp] = conjFac * -stateVecReal[indexLo];
+                stateVecReal[indexLo] = conjFac * -stateImagUp;
+                stateVecImag[indexLo] = conjFac * stateRealUp;
+        }
+    }
+}
 
 void statevec_controlledPauliYLocalSmall(Qureg qureg, const int controlQubit, const int targetQubit, const int conjFac)
 {
+    if((1LL<<controlQubit)>=qureg.numAmpsPerChunk) {
+        if(extractBit(controlQubit,qureg.chunkId*qureg.numAmpsPerChunk)) {
+            statevec_controlledPauliYLocalAll(qureg, controlQubit, targetQubit, conjFac);
+        }
+        return ;
+    }
     long long int sizeBlock, sizeHalfBlock;
     long long int thisBlock, // current block
          indexUp,indexLo;    // current index and corresponding index in lower half block
