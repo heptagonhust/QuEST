@@ -3734,6 +3734,91 @@ void statevec_hadamardDistributedSIMD(Qureg qureg,
         }
     }
 }
+void statevec_phaseShiftByTermAllSIMD (Qureg qureg, const int targetQubit, Complex term)
+{
+    long long int index;
+
+    // const long long int chunkSize=qureg.numAmpsPerChunk;
+    // const long long int chunkId=qureg.chunkId;
+
+    // dimension of the state vector
+    long long int stateVecSize = qureg.numAmpsPerChunk;
+
+    qreal *stateVecReal = qureg.stateVec.real;
+    qreal *stateVecImag = qureg.stateVec.imag;
+
+    __m256d stateRealLoSIMD, stateImagLoSIMD;
+    register const __m256d cosAngleSIMD = _mm256_set1_pd(term.real);
+    register const __m256d sinAngleSIMD = _mm256_set1_pd(term.imag);
+
+# ifdef _OPENMP
+# pragma omp parallel for \
+    shared   (stateVecReal,stateVecImag ) \
+    private  (index,stateRealLoSIMD,stateImagLoSIMD)             \
+    schedule (static)
+# endif
+    for(index=0; index<stateVecSize; index+=4) {
+
+        // update the coeff of the |1> state of the target qubit
+        // targetBit = extractBit (targetQubit, index+chunkId*chunkSize);
+        // if (targetBit) {
+
+            stateRealLoSIMD = _mm256_loadu_pd(stateVecReal+index);
+            stateImagLoSIMD = _mm256_loadu_pd(stateVecImag+index);
+
+            _mm256_storeu_pd(stateVecReal+index, _mm256_sub_pd(\
+                            _mm256_mul_pd(cosAngleSIMD,stateRealLoSIMD),\
+                            _mm256_mul_pd(sinAngleSIMD,stateImagLoSIMD)));
+            //stateVecReal[index] = cosAngle*stateRealLo - sinAngle*stateImagLo;
+
+            _mm256_storeu_pd(stateVecImag+index, _mm256_add_pd(\
+                            _mm256_mul_pd(sinAngleSIMD,stateRealLoSIMD),\
+                            _mm256_mul_pd(cosAngleSIMD,stateImagLoSIMD)));
+            //stateVecImag[index] = sinAngle*stateRealLo + cosAngle*stateImagLo;
+        // }
+    }
+}
+
+
+void statevec_phaseShiftByTermAll (Qureg qureg, const int targetQubit, Complex term)
+{
+    long long int index;
+    long long int stateVecSize;
+    int targetBit;
+
+    const long long int chunkSize=qureg.numAmpsPerChunk;
+    const long long int chunkId=qureg.chunkId;
+
+    // dimension of the state vector
+    stateVecSize = qureg.numAmpsPerChunk;
+    if(stateVecSize>=4) {
+        statevec_phaseShiftByTermAllSIMD(qureg,targetQubit,term);
+        return ;
+    }
+
+    qreal *stateVecReal = qureg.stateVec.real;
+    qreal *stateVecImag = qureg.stateVec.imag;
+
+    qreal stateRealLo, stateImagLo;
+    const qreal cosAngle = term.real;
+    const qreal sinAngle = term.imag;
+
+# ifdef _OPENMP
+# pragma omp parallel for \
+    shared   (stateVecSize, stateVecReal,stateVecImag ) \
+    private  (index,targetBit,stateRealLo,stateImagLo)             \
+    schedule (static)
+# endif
+    for (index=0; index<stateVecSize; index++) {
+
+        // update the coeff of the |1> state of the target qubit
+            stateRealLo = stateVecReal[index];
+            stateImagLo = stateVecImag[index];
+
+            stateVecReal[index] = cosAngle*stateRealLo - sinAngle*stateImagLo;
+            stateVecImag[index] = sinAngle*stateRealLo + cosAngle*stateImagLo;
+    }
+}
 
 void statevec_phaseShiftByTermSmall (Qureg qureg, const int targetQubit, Complex term)
 {
@@ -3741,7 +3826,12 @@ void statevec_phaseShiftByTermSmall (Qureg qureg, const int targetQubit, Complex
 
     // const long long int chunkSize=qureg.numAmpsPerChunk;
     // const long long int chunkId=qureg.chunkId;
-
+    if((1LL<<targetQubit)>=qureg.numAmpsPerChunk) {
+        if(extractBit(targetQubit,qureg.chunkId*qureg.numAmpsPerChunk)) {
+            statevec_phaseShiftByTermAll(qureg,targetQubit,term);
+        }
+        return ;
+    }
     // dimension of the state vector
     const long long int sizeTask = (1LL << targetQubit);
     if(sizeTask >= 4){
