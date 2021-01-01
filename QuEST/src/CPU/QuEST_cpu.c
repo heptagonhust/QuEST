@@ -2258,8 +2258,6 @@ void statevec_controlledCompactUnitaryLocalAll (Qureg qureg, const int controlQu
     qreal stateRealUp,stateRealLo,stateImagUp,stateImagLo;
     long long int thisTask;
     const long long int numTasks=qureg.numAmpsPerChunk>>1;
-    const long long int chunkSize=qureg.numAmpsPerChunk;
-    const long long int chunkId=qureg.chunkId;
 
     // set dimensions
     sizeHalfBlock = 1LL << targetQubit;
@@ -3083,11 +3081,7 @@ void statevec_controlledNotLocalAll(Qureg qureg, const int controlQubit, const i
     qreal stateRealUp,stateImagUp;
     long long int thisTask;
     const long long int numTasks=qureg.numAmpsPerChunk>>1;
-    const long long int chunkSize=qureg.numAmpsPerChunk;
-    const long long int chunkId=qureg.chunkId;
-
-    int controlBit;
-
+    
     // set dimensions
     sizeHalfBlock = 1LL << targetQubit;
     sizeBlock     = 2LL * sizeHalfBlock;
@@ -3099,7 +3093,7 @@ void statevec_controlledNotLocalAll(Qureg qureg, const int controlQubit, const i
 # ifdef _OPENMP
 # pragma omp parallel \
     shared   (sizeBlock,sizeHalfBlock, stateVecReal,stateVecImag) \
-    private  (thisTask,thisBlock ,indexUp,indexLo, stateRealUp,stateImagUp,controlBit)
+    private  (thisTask,thisBlock ,indexUp,indexLo, stateRealUp,stateImagUp)
 # endif
     {
 # ifdef _OPENMP
@@ -3405,10 +3399,6 @@ void statevec_controlledPauliYLocalAll(Qureg qureg, const int controlQubit, cons
     qreal stateRealUp,stateImagUp;
     long long int thisTask;
     const long long int numTasks=qureg.numAmpsPerChunk>>1;
-    const long long int chunkSize=qureg.numAmpsPerChunk;
-    const long long int chunkId=qureg.chunkId;
-
-    int controlBit;
 
     // set dimensions
     sizeHalfBlock = 1LL << targetQubit;
@@ -3421,7 +3411,7 @@ void statevec_controlledPauliYLocalAll(Qureg qureg, const int controlQubit, cons
 # ifdef _OPENMP
 # pragma omp parallel \
     shared   (sizeBlock,sizeHalfBlock, stateVecReal,stateVecImag) \
-    private  (thisTask,thisBlock ,indexUp,indexLo, stateRealUp,stateImagUp,controlBit)
+    private  (thisTask,thisBlock ,indexUp,indexLo, stateRealUp,stateImagUp)
 # endif
     {
 # ifdef _OPENMP
@@ -3886,10 +3876,6 @@ void statevec_phaseShiftByTermAll (Qureg qureg, const int targetQubit, Complex t
 {
     long long int index;
     long long int stateVecSize;
-    int targetBit;
-
-    const long long int chunkSize=qureg.numAmpsPerChunk;
-    const long long int chunkId=qureg.chunkId;
 
     // dimension of the state vector
     stateVecSize = qureg.numAmpsPerChunk;
@@ -3908,7 +3894,7 @@ void statevec_phaseShiftByTermAll (Qureg qureg, const int targetQubit, Complex t
 # ifdef _OPENMP
 # pragma omp parallel for \
     shared   (stateVecSize, stateVecReal,stateVecImag ) \
-    private  (index,targetBit,stateRealLo,stateImagLo)             \
+    private  (index,stateRealLo,stateImagLo)             \
     schedule (static)
 # endif
     for (index=0; index<stateVecSize; index++) {
