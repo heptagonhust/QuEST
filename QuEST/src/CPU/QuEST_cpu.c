@@ -3074,7 +3074,52 @@ void statevec_pauliXDistributed (Qureg qureg,
         }
     }
 }
+void statevec_controlledNotLocalAll(Qureg qureg, const int controlQubit, const int targetQubit)
+{
+    long long int sizeBlock, sizeHalfBlock;
+    long long int thisBlock, // current block
+         indexUp,indexLo;    // current index and corresponding index in lower half block
 
+    qreal stateRealUp,stateImagUp;
+    long long int thisTask;
+    const long long int numTasks=qureg.numAmpsPerChunk>>1;
+    const long long int chunkSize=qureg.numAmpsPerChunk;
+    const long long int chunkId=qureg.chunkId;
+
+    int controlBit;
+
+    // set dimensions
+    sizeHalfBlock = 1LL << targetQubit;
+    sizeBlock     = 2LL * sizeHalfBlock;
+
+    // Can't use qureg.stateVec as a private OMP var
+    qreal *stateVecReal = qureg.stateVec.real;
+    qreal *stateVecImag = qureg.stateVec.imag;
+
+# ifdef _OPENMP
+# pragma omp parallel \
+    shared   (sizeBlock,sizeHalfBlock, stateVecReal,stateVecImag) \
+    private  (thisTask,thisBlock ,indexUp,indexLo, stateRealUp,stateImagUp,controlBit)
+# endif
+    {
+# ifdef _OPENMP
+# pragma omp for schedule (static)
+# endif
+        for (thisTask=0; thisTask<numTasks; thisTask++) {
+            thisBlock   = thisTask / sizeHalfBlock;
+            indexUp     = thisBlock*sizeBlock + thisTask%sizeHalfBlock;
+            indexLo     = indexUp + sizeHalfBlock;
+            stateRealUp = stateVecReal[indexUp];
+            stateImagUp = stateVecImag[indexUp];
+
+            stateVecReal[indexUp] = stateVecReal[indexLo];
+            stateVecImag[indexUp] = stateVecImag[indexLo];
+
+            stateVecReal[indexLo] = stateRealUp;
+            stateVecImag[indexLo] = stateImagUp;
+        }
+    }
+}
 void statevec_controlledNotLocalSmall(Qureg qureg, const int controlQubit, const int targetQubit)
 {
     long long int sizeBlock, sizeHalfBlock;
@@ -3082,7 +3127,12 @@ void statevec_controlledNotLocalSmall(Qureg qureg, const int controlQubit, const
          indexUp,indexLo;    // current index and corresponding index in lower half block
 
     qreal stateRealUp,stateImagUp;
-
+    if((1LL<<targetQubit)>=qureg.numAmpsPerChunk) {
+        if(extractBit(targetQubit,qureg.chunkId*qureg.numAmpsPerChunk)) {
+            statevec_controlledNotLocalAll(qureg,controlQubit,targetQubit);
+        }
+        return ;
+    }
     long long int thisTask;
     const long long int numTasks = ((targetQubit > controlQubit) ? (1LL << (targetQubit - controlQubit - 1)) : (1LL << (controlQubit - targetQubit - 1)));
     // const long long int chunkSize=qureg.numAmpsPerChunk;
