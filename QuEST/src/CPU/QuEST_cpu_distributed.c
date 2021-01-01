@@ -1098,7 +1098,8 @@ void statevec_pauliY(Qureg qureg, const int targetQubit)
     int pairRank; 		// rank of corresponding chunk
 
     if (useLocalDataOnly){
-        statevec_pauliYLocal(qureg, targetQubit, conjFac);
+        // statevec_pauliYLocal(qureg, targetQubit, conjFac);
+        statevec_pauliYLocalSmall(qureg, targetQubit, conjFac);
     } else {
         // need to get corresponding chunk of state vector from other rank
         rankIsUpper = chunkIsUpper(qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);
@@ -1123,7 +1124,8 @@ void statevec_pauliYConj(Qureg qureg, const int targetQubit)
     int pairRank; 		// rank of corresponding chunk
 
     if (useLocalDataOnly){
-        statevec_pauliYLocal(qureg, targetQubit, conjFac);
+        // statevec_pauliYLocal(qureg, targetQubit, conjFac);
+        statevec_pauliYLocalSmall(qureg, targetQubit, conjFac);
     } else {
         // need to get corresponding chunk of state vector from other rank
         rankIsUpper = chunkIsUpper(qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);
