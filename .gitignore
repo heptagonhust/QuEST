@@ -100,7 +100,6 @@ _deps
 __pycache__/
 *.py[cod]
 *$py.class
-*.log
 build/
 out/
 .cache
