@@ -1,5 +1,8 @@
-cmake .. -DDISTRIBUTED=OFF -DMULTITHREADED=ON
-make -j
-./demo >local.log
-diff probs.dat ../examples/probs.dat_random
-diff stateVector.dat ../examples/stateVector.dat_random
+if [ -d "build" ]; then 
+  rm -rf build
+fi
+mkdir build
+cd build
+cmake ../../ -DGPUACCELERATED=ON -DMULTITHREADED=OFF
+make -j6
+mv demo ..

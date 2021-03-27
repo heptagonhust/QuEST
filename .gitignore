@@ -104,3 +104,5 @@ build/
 out/
 .cache
 build-*/
+random/demo
+examples/compile_flags.txt
