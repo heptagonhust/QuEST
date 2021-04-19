@@ -24,6 +24,8 @@
 # include <assert.h>
 # include <immintrin.h>
 
+# include "huge_page_alloc.h"
+
 # ifdef _OPENMP
 # include <omp.h>
 # endif
@@ -1279,11 +1281,11 @@ void statevec_createQureg(Qureg *qureg, int numQubits, QuESTEnv env)
     }
 
     size_t arrSize = (size_t) (numAmpsPerRank * sizeof(*(qureg->stateVec.real)));
-    qureg->stateVec.real = malloc(arrSize);
-    qureg->stateVec.imag = malloc(arrSize);
+    qureg->stateVec.real = huge_alloc(arrSize);
+    qureg->stateVec.imag = huge_alloc(arrSize);
     if (env.numRanks>1){
-        qureg->pairStateVec.real = malloc(arrSize);
-        qureg->pairStateVec.imag = malloc(arrSize);
+        qureg->pairStateVec.real = huge_alloc(arrSize);
+        qureg->pairStateVec.imag = huge_alloc(arrSize);
     }
 
     if ( (!(qureg->stateVec.real) || !(qureg->stateVec.imag))
@@ -1312,11 +1314,11 @@ void statevec_destroyQureg(Qureg qureg, QuESTEnv env){
     qureg.numAmpsTotal = 0;
     qureg.numAmpsPerChunk = 0;
 
-    free(qureg.stateVec.real);
-    free(qureg.stateVec.imag);
+    huge_free(qureg.stateVec.real);
+    huge_free(qureg.stateVec.imag);
     if (env.numRanks>1){
-        free(qureg.pairStateVec.real);
-        free(qureg.pairStateVec.imag);
+        huge_free(qureg.pairStateVec.real);
+        huge_free(qureg.pairStateVec.imag);
     }
     qureg.stateVec.real = NULL;
     qureg.stateVec.imag = NULL;
