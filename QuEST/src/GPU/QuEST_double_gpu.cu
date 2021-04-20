@@ -3,8 +3,8 @@
 
 //cudampiinit
 //cudaAllreduce
-//cudaBroadcast
-//cudaSendRecv
+//cuMPI_Broadcast
+//cuMPI_SendRecv
 
 void copyStateFromCurrentGPU(Qureg qureg){
   copyStateFromGPU(qureg);
@@ -525,6 +525,8 @@ void densmatr_initPureState(Qureg targetQureg, Qureg copyQureg) {
 
 
 void exchangeStateVectors(Qureg qureg, int pairRank){
+  // stage 1 done!
+
   // MPI send/receive vars
   int TAG=100;
   MPI_Status status;
@@ -544,11 +546,11 @@ void exchangeStateVectors(Qureg qureg, int pairRank){
   // receive pairRank's state vector into qureg.pairStateVec
   for (i=0; i<numMessages; i++){
       offset = i*maxMessageCount;
-      MPI_Sendrecv(&qureg.stateVec.real[offset], maxMessageCount, MPI_QuEST_REAL, pairRank, TAG,
+      cuMPI_Sendrecv(&qureg.stateVec.real[offset], maxMessageCount, MPI_QuEST_REAL, pairRank, TAG,
               &qureg.pairStateVec.real[offset], maxMessageCount, MPI_QuEST_REAL,
               pairRank, TAG, MPI_COMM_WORLD, &status);
       //printf("rank: %d err: %d\n", qureg.rank, err);
-      MPI_Sendrecv(&qureg.stateVec.imag[offset], maxMessageCount, MPI_QuEST_REAL, pairRank, TAG,
+      cuMPI_Sendrecv(&qureg.stateVec.imag[offset], maxMessageCount, MPI_QuEST_REAL, pairRank, TAG,
               &qureg.pairStateVec.imag[offset], maxMessageCount, MPI_QuEST_REAL,
               pairRank, TAG, MPI_COMM_WORLD, &status);
   }
@@ -1084,10 +1086,67 @@ void densmatr_mixTwoQubitDepolarising(Qureg qureg, int qubit1, int qubit2, qreal
 
 }
 
+__global__ void statevec_compactUnitaryDistributedKernel (
+  Qureg qureg,
+  Complex rot1, Complex rot2,
+  ComplexArray deviceStateVecUp,
+  ComplexArray deviceStateVecLo,
+  ComplexArray deviceStateVecOut
+){
+  qreal   stateRealUp,stateRealLo,stateImagUp,stateImagLo;
+  long long int thisTask = blockIdx.x*blockDim.x + threadIdx.x;
+  const long long int numTasks=qureg.numAmpsPerChunk;
+
+  if (thisTask>=numTasks) return;
+
+  qreal rot1Real=rot1.real, rot1Imag=rot1.imag;
+  qreal rot2Real=rot2.real, rot2Imag=rot2.imag;
+  qreal *stateVecRealUp=deviceStateVecUp.real, *stateVecImagUp=deviceStateVecUp.imag;
+  qreal *stateVecRealLo=deviceStateVecLo.real, *stateVecImagLo=deviceStateVecLo.imag;
+  qreal *stateVecRealOut=deviceStateVecOut.real, *stateVecImagOut=deviceStateVecOut.imag;
+
+  // store current state vector values in temp variables
+  stateRealUp = stateVecRealUp[thisTask];
+  stateImagUp = stateVecImagUp[thisTask];
+
+  stateRealLo = stateVecRealLo[thisTask];
+  stateImagLo = stateVecImagLo[thisTask];
+
+  // state[indexUp] = alpha * state[indexUp] - conj(beta)  * state[indexLo]
+  stateVecRealOut[thisTask] = rot1Real*stateRealUp - rot1Imag*stateImagUp + rot2Real*stateRealLo + rot2Imag*stateImagLo;
+  stateVecImagOut[thisTask] = rot1Real*stateImagUp + rot1Imag*stateRealUp + rot2Real*stateImagLo - rot2Imag*stateRealLo;
+}
+
+/** Rotate a single qubit in the state vector of probability amplitudes, 
+ * given two complex numbers alpha and beta, 
+ * and a subset of the state vector with upper and lower block values stored seperately.
+ *                                                                       
+ *  @param[in,out] qureg object representing the set of qubits
+ *  @param[in] rot1 rotation angle
+ *  @param[in] rot2 rotation angle
+ *  @param[in] stateVecUp probability amplitudes in upper half of a block
+ *  @param[in] stateVecLo probability amplitudes in lower half of a block
+ *  @param[out] stateVecOut array section to update (will correspond to either the lower or upper half of a block)
+ */
+ void statevec_compactUnitaryDistributed (Qureg qureg,
+  Complex rot1, Complex rot2,
+  ComplexArray stateVecUp,
+  ComplexArray stateVecLo,
+  ComplexArray stateVecOut)
+{
+  assert(isReadyOnGPU(qureg));
+  int threadsPerCUDABlock, CUDABlocks;
+  threadsPerCUDABlock = 128;
+  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);
+  statevec_compactUnitaryDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg,rot1,rot2,
+    stateVecUp, //upper
+    stateVecLo, //lower
+    stateVecOut); //output
+}
 
 void statevec_compactUnitary(Qureg qureg, const int targetQubit, Complex alpha, Complex beta)
 {
-
+  // stage 1 done! need to optimize!
   // !!simple in local_cpu
 
   // flag to require memory exchange. 1: an entire block fits on one rank, 0: at most half a block fits on one rank
@@ -1100,7 +1159,7 @@ void statevec_compactUnitary(Qureg qureg, const int targetQubit, Complex alpha, 
 
   if (useLocalDataOnly){
     // all values required to update state vector lie in this rank
-    statevec_compactUnitaryLocalSmall(qureg, targetQubit, alpha, beta);
+    statevec_compactUnitaryLocal(qureg, targetQubit, alpha, beta);
   } else {
     // need to get corresponding chunk of state vector from other rank
     rankIsUpper = chunkIsUpper(qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);
@@ -1290,8 +1349,52 @@ void statevec_multiControlledUnitary(Qureg qureg, long long int ctrlQubitsMask, 
   }
 }
 
+__global__ void statevec_pauliXDistributedKernel(
+  Qureg qureg,
+  ComplexArray deviceStateVecIn,
+  ComplexArray deviceStateVecOut
+){
+  // stage 1 done! need to optimize!
+
+  long long int thisTask = blockIdx.x*blockDim.x + threadIdx.x;
+  const long long int numTasks=qureg.numAmpsPerChunk;
+
+  if (thisTask>=numTasks) return;
+
+  qreal *stateVecRealIn=deviceStateVecIn.real, *stateVecImagIn=deviceStateVecIn.imag;
+  qreal *stateVecRealOut=deviceStateVecOut.real, *stateVecImagOut=deviceStateVecOut.imag;
+
+  stateVecRealOut[thisTask] = stateVecRealIn[thisTask];
+  stateVecImagOut[thisTask] = stateVecImagIn[thisTask];
+}
+
+/** Rotate a single qubit by {{0,1},{1,0}.
+ *  Operate on a subset of the state vector with upper and lower block values
+ *  stored seperately. This rotation is just swapping upper and lower values, and
+ *  stateVecIn must already be the correct section for this chunk
+ *
+ *  @remarks Qubits are zero-based and the
+ *  the first qubit is the rightmost
+ *
+ *  @param[in,out] qureg object representing the set of qubits
+ *  @param[in] stateVecIn probability amplitudes in lower or upper half of a block depending on chunkId
+ *  @param[out] stateVecOut array section to update (will correspond to either the lower or upper half of a block)
+ */
+void statevec_pauliXDistributed (Qureg qureg,
+        ComplexArray stateVecIn,
+        ComplexArray stateVecOut)
+{
+  assert(isReadyOnGPU(qureg));
+  int threadsPerCUDABlock, CUDABlocks;
+  threadsPerCUDABlock = 128;
+  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);
+  statevec_pauliXDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg, stateVecIn, stateVecOut);
+}
+
 void statevec_pauliX(Qureg qureg, const int targetQubit)
 {
+
+  // stage 1 done!
 
   //!!simple in local_cpu
 
@@ -1304,8 +1407,7 @@ void statevec_pauliX(Qureg qureg, const int targetQubit)
 
   if (useLocalDataOnly){
     // all values required to update state vector lie in this rank
-    // statevec_pauliXLocal(qureg, targetQubit);
-    statevec_pauliXLocalSmall(qureg, targetQubit);
+    statevec_pauliXLocal(qureg, targetQubit);
   } else {
     // need to get corresponding chunk of state vector from other rank
     rankIsUpper = chunkIsUpper(qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);
@@ -1317,12 +1419,62 @@ void statevec_pauliX(Qureg qureg, const int targetQubit)
     // this rank's values with pair values
     statevec_pauliXDistributed(qureg,
             qureg.pairStateVec, // in
-            qureg.stateVec); // out
+            qureg.stateVec/*not sure TODO*/); // out
   }
 }
 
+
+__global__ void statevec_controlledNotDistributedKernel (
+  Qureg qureg,
+  const int controlQubit,
+  ComplexArray deviceStateVecIn,
+  ComplexArray deviceStateVecOut
+){
+  long long int thisTask = blockIdx.x*blockDim.x + threadIdx.x;
+  const long long int numTasks=qureg.numAmpsPerChunk;
+
+  if (thisTask>=numTasks) return;
+
+  const long long int chunkSize=qureg.numAmpsPerChunk;
+  const long long int chunkId=qureg.chunkId;
+  
+  int controlBit;
+  
+  qreal *stateVecRealIn=deviceStateVecIn.real, *stateVecImagIn=deviceStateVecIn.imag;
+  qreal *stateVecRealOut=deviceStateVecOut.real, *stateVecImagOut=deviceStateVecOut.imag;
+  
+  controlBit = extractBit (controlQubit, thisTask+chunkId*chunkSize);
+  if (controlBit){
+      stateVecRealOut[thisTask] = stateVecRealIn[thisTask];
+      stateVecImagOut[thisTask] = stateVecImagIn[thisTask];
+  }
+}
+
+/** Rotate a single qubit by {{0,1},{1,0}.
+ *  Operate on a subset of the state vector with upper and lower block values 
+ *  stored seperately. This rotation is just swapping upper and lower values, and
+ *  stateVecIn must already be the correct section for this chunk. Only perform the rotation
+ *  for elements where controlQubit is one.
+ *                                          
+ *  @param[in,out] qureg object representing the set of qubits
+ *  @param[in] stateVecIn probability amplitudes in lower or upper half of a block depending on chunkId
+ *  @param[out] stateVecOut array section to update (will correspond to either the lower or upper half of a block)
+ */
+ void statevec_controlledNotDistributed (Qureg qureg, const int controlQubit,
+  ComplexArray stateVecIn,
+  ComplexArray stateVecOut)
+{
+  assert(isReadyOnGPU(qureg));
+  int threadsPerCUDABlock, CUDABlocks;
+  threadsPerCUDABlock = 128;
+  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);
+  statevec_controlledNotDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg, controlQubit, stateVecIn, stateVecOut);  
+} 
+
+
 void statevec_controlledNot(Qureg qureg, const int controlQubit, const int targetQubit)
 {
+  // stage 1 done! need to optimize!
 
   //!!simple in local_cpu
 
@@ -1333,8 +1485,7 @@ void statevec_controlledNot(Qureg qureg, const int controlQubit, const int targe
 
   if (useLocalDataOnly){
     // all values required to update state vector lie in this rank
-    //statevec_controlledNotLocal(qureg, controlQubit, targetQubit);
-    statevec_controlledNotLocalSmall(qureg, controlQubit, targetQubit);
+    statevec_controlledNotLocal(qureg, controlQubit, targetQubit);
   } else {
     // need to get corresponding chunk of state vector from other rank
     rankIsUpper = chunkIsUpper(qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);
@@ -1354,11 +1505,65 @@ void statevec_controlledNot(Qureg qureg, const int controlQubit, const int targe
   }
 }
 
+__global__ void statevec_pauliYDistributedKernel(
+  Qureg qureg,
+  ComplexArray deviceStateVecIn,
+  ComplexArray deviceStateVecOut,
+  int updateUpper, const int conjFac
+){
+  long long int thisTask = blockIdx.x*blockDim.x + threadIdx.x;;
+  const long long int numTasks=qureg.numAmpsPerChunk;
+
+  if (thisTask>=numTasks) return;
+
+  qreal *stateVecRealIn=deviceStateVecIn.real, *stateVecImagIn=deviceStateVecIn.imag;
+  qreal *stateVecRealOut=deviceStateVecOut.real, *stateVecImagOut=deviceStateVecOut.imag;
+
+  int realSign=1, imagSign=1;
+  if (updateUpper) imagSign=-1;
+  else realSign = -1;
+
+  stateVecRealOut[thisTask] = conjFac * realSign * stateVecImagIn[thisTask];
+  stateVecImagOut[thisTask] = conjFac * imagSign * stateVecRealIn[thisTask];
+}
+
+/** Rotate a single qubit by +-{{0,-i},{i,0}.
+ *  Operate on a subset of the state vector with upper and lower block values
+ *  stored seperately. This rotation is just swapping upper and lower values, and
+ *  stateVecIn must already be the correct section for this chunk
+ *
+ *  @remarks Qubits are zero-based and the
+ *  the first qubit is the rightmost
+ *
+ *  @param[in,out] qureg object representing the set of qubits
+ *  @param[in] stateVecIn probability amplitudes in lower or upper half of a block depending on chunkId
+ *  @param[in] updateUpper flag, 1: updating upper values, 0: updating lower values in block
+ *  @param[out] stateVecOut array section to update (will correspond to either the lower or upper half of a block)
+ */
+void statevec_pauliYDistributed(Qureg qureg,
+        ComplexArray stateVecIn,
+        ComplexArray stateVecOut,
+        int updateUpper, const int conjFac)
+{
+  assert(isReadyOnGPU(qureg));
+  int threadsPerCUDABlock, CUDABlocks;
+  threadsPerCUDABlock = 128;
+  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);
+  statevec_pauliYDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
+    qureg, 
+    stateVecIn, 
+    stateVecOut, 
+    updateUpper, 
+    conjFac
+  );
+}
+
 void statevec_pauliY(Qureg qureg, const int targetQubit)
 {
+  // stage 1 done! need to optizize!
+
   //!!care about local_cpu code blow:
   //int conjFac = 1;
-
 
 	int conjFac = 1;
 
@@ -1368,8 +1573,7 @@ void statevec_pauliY(Qureg qureg, const int targetQubit)
     int pairRank; 		// rank of corresponding chunk
 
     if (useLocalDataOnly){
-        // statevec_pauliYLocal(qureg, targetQubit, conjFac);
-        statevec_pauliYLocalSmall(qureg, targetQubit, conjFac);
+        statevec_pauliYLocal(qureg, targetQubit, conjFac);
     } else {
         // need to get corresponding chunk of state vector from other rank
         rankIsUpper = chunkIsUpper(qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);
@@ -1379,16 +1583,17 @@ void statevec_pauliY(Qureg qureg, const int targetQubit)
         // this rank's values are either in the upper of lower half of the block
         statevec_pauliYDistributed(qureg,
                 qureg.pairStateVec, // in
-                qureg.stateVec, // out
+                /*not sure TODO*/qureg.stateVec, // out
                 rankIsUpper, conjFac);
     }
 }
 
 void statevec_pauliYConj(Qureg qureg, const int targetQubit)
 {
+  // stage 1 done! need to optizize!
+
   //!!similar to pauliY, care code from cpu_local:
   //int conjFac = -1;
-
 
 	int conjFac = -1;
 
@@ -1398,8 +1603,7 @@ void statevec_pauliYConj(Qureg qureg, const int targetQubit)
   int pairRank; 		// rank of corresponding chunk
 
   if (useLocalDataOnly){
-    // statevec_pauliYLocal(qureg, targetQubit, conjFac);
-    statevec_pauliYLocalSmall(qureg, targetQubit, conjFac);
+    statevec_pauliYLocal(qureg, targetQubit, conjFac);
   } else {
     // need to get corresponding chunk of state vector from other rank
     rankIsUpper = chunkIsUpper(qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);
@@ -1409,7 +1613,7 @@ void statevec_pauliYConj(Qureg qureg, const int targetQubit)
     // this rank's values are either in the upper of lower half of the block
     statevec_pauliYDistributed(qureg,
             qureg.pairStateVec, // in
-            qureg.stateVec, // out
+            qureg.stateVec/*not sure TODO*/, // out
             rankIsUpper, conjFac);
   }
 }
@@ -1488,8 +1692,69 @@ void statevec_controlledPauliYConj(Qureg qureg, const int controlQubit, const in
   }
 }
 
+__global__ void statevec_hadamardDistributedKernel(
+  Qureg qureg,
+  ComplexArray deviceStateVecUp,
+  ComplexArray deviceStateVecLo,
+  ComplexArray deviceStateVecOut,
+  int updateUpper
+){
+  qreal   stateRealUp,stateRealLo,stateImagUp,stateImagLo;
+  long long int thisTask = blockIdx.x*blockDim.x + threadIdx.x;
+  const long long int numTasks=qureg.numAmpsPerChunk;
+
+  if (thisTask>=numTasks) return;
+
+  int sign;
+  if (updateUpper) sign=1;
+  else sign=-1;
+
+  qreal recRoot2 = 1.0/sqrt(2);
+
+  qreal *stateVecRealUp=deviceStateVecUp.real, *stateVecImagUp=deviceStateVecUp.imag;
+  qreal *stateVecRealLo=deviceStateVecLo.real, *stateVecImagLo=deviceStateVecLo.imag;
+  qreal *stateVecRealOut=deviceStateVecOut.real, *stateVecImagOut=deviceStateVecOut.imag;
+
+  // store current state vector values in temp variables
+  stateRealUp = stateVecRealUp[thisTask];
+  stateImagUp = stateVecImagUp[thisTask];
+
+  stateRealLo = stateVecRealLo[thisTask];
+  stateImagLo = stateVecImagLo[thisTask];
+
+  stateVecRealOut[thisTask] = recRoot2*(stateRealUp + sign*stateRealLo);
+  stateVecImagOut[thisTask] = recRoot2*(stateImagUp + sign*stateImagLo);
+}
+
+/** Rotate a single qubit by {{1,1},{1,-1}}/sqrt2.
+ *  Operate on a subset of the state vector with upper and lower block values 
+ *  stored seperately. This rotation is just swapping upper and lower values, and
+ *  stateVecIn must already be the correct section for this chunk
+ *                                          
+ *  @param[in,out] qureg object representing the set of qubits
+ *  @param[in] stateVecIn probability amplitudes in lower or upper half of a block depending on chunkId
+ *  @param[in] updateUpper flag, 1: updating upper values, 0: updating lower values in block
+ *  @param[out] stateVecOut array section to update (will correspond to either the lower or upper half of a block)
+ */
+ void statevec_hadamardDistributed(Qureg qureg,
+  ComplexArray stateVecUp,
+  ComplexArray stateVecLo,
+  ComplexArray stateVecOut,
+  int updateUpper)
+{
+  assert(isReadyOnGPU(qureg));
+  int threadsPerCUDABlock, CUDABlocks;
+  threadsPerCUDABlock = 128;
+  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);
+  statevec_hadamardDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg,
+    stateVecUp, //upper
+    stateVecLo, //lower
+    stateVecOut, updateUpper); //output
+}
+
 void statevec_hadamard(Qureg qureg, const int targetQubit)
 {
+  // stage 1 done! need to optimize!
   //!!simple in local_cpu
 
   // flag to require memory exchange. 1: an entire block fits on one rank, 0: at most half a block fits on one rank
@@ -1501,7 +1766,7 @@ void statevec_hadamard(Qureg qureg, const int targetQubit)
 
   if (useLocalDataOnly){
     // all values required to update state vector lie in this rank
-    statevec_hadamardLocalSmall(qureg, targetQubit);
+    statevec_hadamardLocal(qureg, targetQubit);
   } else {
     // need to get corresponding chunk of state vector from other rank
     rankIsUpper = chunkIsUpper(qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);

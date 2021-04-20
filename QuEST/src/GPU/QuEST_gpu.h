@@ -37,4 +37,7 @@ inline int maskContainsBitOnCPU(long long int mask, int bitInd) {
 //     return insertZeroBitOnCPU(insertZeroBitOnCPU(number, small), big);
 // }
 
+
+#include <assert.h>
+
 #endif
