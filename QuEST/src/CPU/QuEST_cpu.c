@@ -1749,43 +1749,43 @@ void statevec_compactUnitaryLocalSIMD (Qureg qureg, const int targetQubit, Compl
             //stateVecReal[indexUp] = alphaReal*stateRealUp - alphaImag*stateImagUp
             //    - betaReal*stateRealLo - betaImag*stateImagLo;
             __m256d res1 =  _mm256_mul_pd(alphaRealSIMD,stateRealUpSIMD);
-            res1 = _mm256_fnmsub_pd(alphaImagSIMD, stateImagUpSIMD, res1);
+            res1 = _mm256_fnmadd_pd(alphaImagSIMD, stateImagUpSIMD, res1);
             // res1 = _mm256_sub_pd(res1,_mm256_mul_pd(alphaImagSIMD,stateImagUpSIMD));
-            res1 = _mm256_fnmsub_pd(res1, betaRealSIMD, stateRealLoSIMD);
+            res1 = _mm256_fnmadd_pd(betaRealSIMD, stateRealLoSIMD, res1);
             // res1 = _mm256_sub_pd(res1,_mm256_mul_pd(betaRealSIMD,stateRealLoSIMD));
-            res1 = _mm256_fnmsub_pd(res1, betaImagSIMD, stateImagLoSIMD);
+            res1 = _mm256_fnmadd_pd(betaImagSIMD, stateImagLoSIMD, res1);
             // res1 = _mm256_sub_pd(res1,_mm256_mul_pd(betaImagSIMD,stateImagLoSIMD));
 
 
             //stateVecImag[indexUp] = alphaReal*stateImagUp + alphaImag*stateRealUp
             //    - betaReal*stateImagLo + betaImag*stateRealLo;
             __m256d res2 =  _mm256_mul_pd(alphaRealSIMD,stateImagUpSIMD);
-            res2 = _mm256_fmadd_pd(res2, alphaImagSIMD, stateRealUpSIMD);
+            res2 = _mm256_fmadd_pd(alphaImagSIMD, stateRealUpSIMD, res2);
             // res2 = _mm256_add_pd(res2,_mm256_mul_pd(alphaImagSIMD,stateRealUpSIMD));
-            res1 = _mm256_fnmsub_pd(res2, betaRealSIMD, stateImagLoSIMD);
+            res1 = _mm256_fnmadd_pd(betaRealSIMD, stateImagLoSIMD, res2);
             // res2 = _mm256_sub_pd(res2,_mm256_mul_pd(betaRealSIMD,stateImagLoSIMD));
-            res2 = _mm256_fmadd_pd(res2, betaImagSIMD, stateRealLoSIMD);
+            res2 = _mm256_fmadd_pd(betaImagSIMD, stateRealLoSIMD, res2);
             // res2 = _mm256_add_pd(res2,_mm256_mul_pd(betaImagSIMD,stateRealLoSIMD));
 
             // state[indexLo] = beta  * state[indexUp] + conj(alpha) * state[indexLo]
             //stateVecReal[indexLo] = betaReal*stateRealUp - betaImag*stateImagUp
             //    + alphaReal*stateRealLo + alphaImag*stateImagLo;
             __m256d res3 = _mm256_mul_pd(betaRealSIMD,stateRealUpSIMD);
-            res1 = _mm256_fnmsub_pd(res3, betaImagSIMD, stateImagUpSIMD);
+            res1 = _mm256_fnmadd_pd(betaImagSIMD, stateImagUpSIMD, res3);
             // res3 = _mm256_sub_pd(res3,_mm256_mul_pd(betaImagSIMD,stateImagUpSIMD));
-            res2 = _mm256_fmadd_pd(res3, alphaRealSIMD, stateRealLoSIMD);
+            res2 = _mm256_fmadd_pd(alphaRealSIMD, stateRealLoSIMD, res3);
             // res3 = _mm256_add_pd(res3,_mm256_mul_pd(alphaRealSIMD,stateRealLoSIMD));
-            res2 = _mm256_fmadd_pd(res3, alphaImagSIMD, stateImagLoSIMD);
+            res2 = _mm256_fmadd_pd(alphaImagSIMD, stateImagLoSIMD, res3);
             // res3 = _mm256_add_pd(res3,_mm256_mul_pd(alphaImagSIMD,stateImagLoSIMD));
 
             //stateVecImag[indexLo] = betaReal*stateImagUp + betaImag*stateRealUp
             //    + alphaReal*stateImagLo - alphaImag*stateRealLo;
             __m256d res4 = _mm256_mul_pd(betaRealSIMD,stateImagUpSIMD);
-            res2 = _mm256_fmadd_pd(res4, betaImagSIMD, stateRealUpSIMD);
+            res2 = _mm256_fmadd_pd(betaImagSIMD, stateRealUpSIMD, res4);
             // res4 = _mm256_add_pd(res4,_mm256_mul_pd(betaImagSIMD,stateRealUpSIMD));
-            res2 = _mm256_fmadd_pd(res4, alphaRealSIMD, stateImagLoSIMD);
+            res2 = _mm256_fmadd_pd(alphaRealSIMD, stateImagLoSIMD, res4);
             // res4 = _mm256_add_pd(res4,_mm256_mul_pd(alphaRealSIMD,stateImagLoSIMD));
-            res1 = _mm256_fnmsub_pd(res4, alphaImagSIMD, stateRealLoSIMD);
+            res1 = _mm256_fnmadd_pd(alphaImagSIMD, stateRealLoSIMD, res4);
             // res4 = _mm256_sub_pd(res4,_mm256_mul_pd(alphaImagSIMD,stateRealLoSIMD));
 
             _mm256_storeu_pd(stateVecReal+indexUp,res1);
@@ -2805,7 +2805,8 @@ void statevec_controlledCompactUnitaryLocalSIMD (Qureg qureg, const int controlQ
                     //stateVecReal[indexUp] = alphaReal*stateRealUp - alphaImag*stateImagUp
                     //    - betaReal*stateRealLo - betaImag*stateImagLo;
                     __m256d res1 =  _mm256_mul_pd(alphaRealSIMD,stateRealUpSIMD);
-                    res1 = _mm256_sub_pd(res1,_mm256_mul_pd(alphaImagSIMD,stateImagUpSIMD));
+                    res1 = _mm256
+                    // res1 = _mm256_sub_pd(res1,_mm256_mul_pd(alphaImagSIMD,stateImagUpSIMD));
                     res1 = _mm256_sub_pd(res1,_mm256_mul_pd(betaRealSIMD,stateRealLoSIMD));
                     res1 = _mm256_sub_pd(res1,_mm256_mul_pd(betaImagSIMD,stateImagLoSIMD));
 
