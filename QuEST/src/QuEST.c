@@ -32,6 +32,7 @@ extern "C" {
  */
 
 Qureg createQureg(int numQubits, QuESTEnv env) {
+    // stage 1 is fine recursively!
     validateCreateNumQubits(numQubits, __func__);
     
     Qureg qureg;

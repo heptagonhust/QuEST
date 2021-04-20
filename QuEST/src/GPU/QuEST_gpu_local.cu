@@ -274,17 +274,21 @@ void densmatr_initClassicalState(Qureg qureg, long long int stateInd)
         qureg.deviceStateVec.imag, densityInd);
 }
 
-// @@TODO mainly concern
 void statevec_createQureg(Qureg *qureg, int numQubits, QuESTEnv env)
 {   
+    // phase 1 done!
+
     // allocate CPU memory
+    // this part is same with cpu local +yh
+
     long long int numAmps = 1L << numQubits;
     long long int numAmpsPerRank = numAmps/env.numRanks;
-    qureg->stateVec.real = (qreal*) malloc(numAmpsPerRank * sizeof(qureg->stateVec.real));
-    qureg->stateVec.imag = (qreal*) malloc(numAmpsPerRank * sizeof(qureg->stateVec.imag));
+    // fix pointers problems from origin QuEST-kit repo. yh 2021.3.28
+    qureg->stateVec.real = (qreal*) malloc(numAmpsPerRank * sizeof(*(qureg->stateVec.real)));
+    qureg->stateVec.imag = (qreal*) malloc(numAmpsPerRank * sizeof(*(qureg->stateVec.imag)));
     if (env.numRanks>1){
-        qureg->pairStateVec.real = (qreal*) malloc(numAmpsPerRank * sizeof(qureg->pairStateVec.real));
-        qureg->pairStateVec.imag = (qreal*) malloc(numAmpsPerRank * sizeof(qureg->pairStateVec.imag));
+        qureg->pairStateVec.real = (qreal*) malloc(numAmpsPerRank * sizeof(*(qureg->pairStateVec.real)));
+        qureg->pairStateVec.imag = (qreal*) malloc(numAmpsPerRank * sizeof(*(qureg->pairStateVec.imag)));
     }
 
     // check cpu memory allocation was successful
@@ -321,9 +325,14 @@ void statevec_createQureg(Qureg *qureg, int numQubits, QuESTEnv env)
 
 }
 
-// @@TODO
 void statevec_destroyQureg(Qureg qureg, QuESTEnv env)
 {
+    // phase 1 done!
+    // add extra reset from cpu local.
+    qureg.numQubitsInStateVec = 0;
+    qureg.numAmpsTotal = 0;
+    qureg.numAmpsPerChunk = 0;
+
     // Free CPU memory
     free(qureg.stateVec.real);
     free(qureg.stateVec.imag);
@@ -331,6 +340,10 @@ void statevec_destroyQureg(Qureg qureg, QuESTEnv env)
         free(qureg.pairStateVec.real);
         free(qureg.pairStateVec.imag);
     }
+    qureg.stateVec.real = NULL;
+    qureg.stateVec.imag = NULL;
+    qureg.pairStateVec.real = NULL;
+    qureg.pairStateVec.imag = NULL;
 
     // Free GPU memory
     cudaFree(qureg.deviceStateVec.real);
@@ -338,6 +351,8 @@ void statevec_destroyQureg(Qureg qureg, QuESTEnv env)
 }
 
 int GPUExists(void){
+    // phase 1 done!
+    // there is nothing to do, maybe change it to CUDA API directly.
     int deviceCount, device;
     int gpuDeviceCount = 0;
     struct cudaDeviceProp properties;
@@ -355,6 +370,8 @@ int GPUExists(void){
 }
 
 QuESTEnv createQuESTEnvLocal(void) {
+    // phase 1 done!
+    // this function is not used by distributed gpu method
     // init MPI environment
     if (!GPUExists()){
         printf("Trying to run GPU code with no GPU available\n");
@@ -371,10 +388,14 @@ QuESTEnv createQuESTEnvLocal(void) {
 }
 
 void syncQuESTEnvLocal(QuESTEnv env){
+    // phase 1 done!
+    // this function is not used by distributed gpu method
     cudaDeviceSynchronize();
 } 
 
 int syncQuESTSuccessLocal(int successCode){
+    // phase 1 done!
+    // this function is not used by distributed gpu method
     return successCode;
 }
 
@@ -503,6 +524,8 @@ __global__ void statevec_initZeroStateKernel(long long int stateVecSize, qreal *
 
 void statevec_initZeroState(Qureg qureg)
 {
+    // stage 1 done!
+    // is fine for distributed gpu
     int threadsPerCUDABlock, CUDABlocks;
     threadsPerCUDABlock = 128;
     CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
@@ -1345,41 +1368,67 @@ void statevec_controlledPauliYConjLocal(Qureg qureg, const int controlQubit, con
 }
 
 __global__ void statevec_phaseShiftByTermKernel(Qureg qureg, const int targetQubit, qreal cosAngle, qreal sinAngle) {
+    // stage 1 done!
 
-    long long int sizeBlock, sizeHalfBlock;
-    long long int thisBlock, indexUp,indexLo;
+    // !only for single gpu
+    // long long int sizeBlock, sizeHalfBlock, thisBlock;
+    // long long int indexUp, indexLo;
 
-    qreal stateRealLo, stateImagLo;             
-    long long int thisTask; 
-    const long long int numTasks = qureg.numAmpsPerChunk >> 1;
+    qreal stateRealLo, stateImagLo;
+    long long int thisTask, exactTask; // exactTask is global rank for distributed gpu.
+    // const long long int numTasks = qureg.numAmpsPerChunk >> 1; // !only for single gpu
+    const long long int numTasks = qureg.numAmpsPerChunk;
 
-    sizeHalfBlock = 1LL << targetQubit;
-    sizeBlock     = 2LL * sizeHalfBlock;
+    // distributed gpu
+    const long long int sizeChunk = qureg.numAmpsPerChunk;
+    const long long int chunkId = qureg.chunkId;
 
-    qreal *stateVecReal = qureg.deviceStateVec.real;
-    qreal *stateVecImag = qureg.deviceStateVec.imag;
+    /* yh comment */
+    /* sizeHalfBlock & sizeBlock using binary count trick
+        e.g. qubit num = 3, target qubit = 1 (id begin with 0)
+        000, 001 the center bit (qubit1) is 0 occur continuously for 2 times
+        010, 011 when the center bit is 1, the next related bit(#) will add sizeBlock(=4) to index
+        100, 101
+        #110, 111
+    */
+    // !only for single gpu
+    // sizeHalfBlock = 1LL << targetQubit;
+    // sizeBlock     = 2LL * sizeHalfBlock;
 
+    // qreal *stateVecReal = qureg.deviceStateVec.real;
+    // qreal *stateVecImag = qureg.deviceStateVec.imag;
+
+    // thisTask = blockIdx.x*blockDim.x + threadIdx.x;
+    // if (thisTask>=numTasks) return;
+    // thisBlock   = thisTask / sizeHalfBlock;
+    // indexUp     = thisBlock*sizeBlock + thisTask%sizeHalfBlock;
+    // indexLo     = indexUp + sizeHalfBlock;
+    
     thisTask = blockIdx.x*blockDim.x + threadIdx.x;
     if (thisTask>=numTasks) return;
-    thisBlock   = thisTask / sizeHalfBlock;
-    indexUp     = thisBlock*sizeBlock + thisTask%sizeHalfBlock;
-    indexLo     = indexUp + sizeHalfBlock;
+    exactTask = thisTask + chunkId*sizeChunk;
 
-    stateRealLo = stateVecReal[indexLo];
-    stateImagLo = stateVecImag[indexLo];
+    if ( extractBit(targetQubit, exactTask) ) {
+        
+        stateRealLo = stateVecReal[thisTask];
+        stateImagLo = stateVecImag[thisTask];
 
-    stateVecReal[indexLo] = cosAngle*stateRealLo - sinAngle*stateImagLo;
-    stateVecImag[indexLo] = sinAngle*stateRealLo + cosAngle*stateImagLo;
+        stateVecReal[thisTask] = cosAngle*stateRealLo - sinAngle*stateImagLo;
+        stateVecImag[thisTask] = sinAngle*stateRealLo + cosAngle*stateImagLo;
+    }
 }
 
 void statevec_phaseShiftByTerm(Qureg qureg, const int targetQubit, Complex term)
 {   
+    // stage 1 done!
     qreal cosAngle = term.real;
     qreal sinAngle = term.imag;
     
     int threadsPerCUDABlock, CUDABlocks;
     threadsPerCUDABlock = 128;
-    CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);
+    
+    // CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);
+    CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
     statevec_phaseShiftByTermKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg, targetQubit, cosAngle, sinAngle);
 }
 
@@ -1503,9 +1552,6 @@ qreal densmatr_calcTotalProbLocal(Qureg qureg) {
 }
 
 qreal statevec_calcTotalProbLocal(Qureg qureg){
-    // phase 1 done!
-    // gpu local is almost same with cpu local
-
     /* IJB - implemented using Kahan summation for greater accuracy at a slight floating
        point operation overhead. For more details see https://en.wikipedia.org/wiki/Kahan_summation_algorithm */
     /* Don't change the bracketing in this routine! */

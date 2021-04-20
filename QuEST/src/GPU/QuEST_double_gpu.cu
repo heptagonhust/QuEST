@@ -1,14 +1,18 @@
 #include "QuEST_gpu_local.cu"
-
+#include "QuEST_gpu.h"
 
 //cudampiinit
 //cudaAllreduce
 //cudaBroadcast
 //cudaSendRecv
 
+void copyStateFromCurrentGPU(Qureg qureg){
+  copyStateFromGPU(qureg);
+}
 
 Complex statevec_calcInnerProduct(Qureg bra, Qureg ket) {
-  // phase 1 done!
+  // phase 1 done! (mode 1)
+
   Complex localInnerProd = statevec_calcInnerProductLocal(bra, ket);
   if (bra.numChunks == 1)
     return localInnerProd;
@@ -26,13 +30,16 @@ Complex statevec_calcInnerProduct(Qureg bra, Qureg ket) {
 }
 
 qreal densmatr_calcTotalProb(Qureg qureg) {
-
-  copyStateFromMultiGPU(qureg);
+  // phase 1 done! (mode 2)
+  // gpu local is almost same with cpu local
 
 	// computes the trace by summing every element ("diag") with global index (2^n + 1)i for i in [0, 2^n-1]
 
 	// computes first local index containing a diagonal element
 	long long int diagSpacing = 1LL + (1LL << qureg.numQubitsRepresented);
+
+  copyStateFromCurrentGPU(qureg);
+
   long long int numPrevDiags = (qureg.chunkId>0)? 1+(qureg.chunkId*qureg.numAmpsPerChunk)/diagSpacing : 0;
   long long int globalIndNextDiag = diagSpacing * numPrevDiags;
   long long int localIndNextDiag = globalIndNextDiag % qureg.numAmpsPerChunk;
@@ -63,7 +70,9 @@ qreal densmatr_calcTotalProb(Qureg qureg) {
 }
 
 qreal statevec_calcTotalProbLocal(Qureg qureg){
-  copyStateFromMultiGPU(qureg);
+  // phase 1 done! (mode 2)
+  // gpu local is almost same with cpu local
+
   // Implemented using Kahan summation for greater accuracy at a slight floating
   //   point operation overhead. For more details see https://en.wikipedia.org/wiki/Kahan_summation_algorithm
   qreal pTotal=0;
@@ -71,6 +80,9 @@ qreal statevec_calcTotalProbLocal(Qureg qureg){
   qreal allRankTotals=0;
   long long int index;
   long long int numAmpsPerRank = qureg.numAmpsPerChunk;
+
+  copyStateFromCurrentGPU(qureg);
+
   c = 0.0;
   for (index=0; index<numAmpsPerRank; index++){
       // Perform pTotal+=qureg.stateVec.real[index]*qureg.stateVec.real[index]; by Kahan
@@ -87,9 +99,9 @@ qreal statevec_calcTotalProbLocal(Qureg qureg){
       pTotal = t;
   }
   if (qureg.numChunks>1)
-  MPI_Allreduce(&pTotal, &allRankTotals, 1, MPI_QuEST_REAL, MPI_SUM, MPI_COMM_WORLD);
+    MPI_Allreduce(&pTotal, &allRankTotals, 1, MPI_QuEST_REAL, MPI_SUM, MPI_COMM_WORLD);
   else
-  allRankTotals=pTotal;
+    allRankTotals=pTotal;
 
   return allRankTotals;
 }
@@ -103,48 +115,72 @@ static int getChunkOuterBlockPairId(int chunkIsUpper, int chunkId, long long int
 static int halfMatrixBlockFitsInChunk(long long int chunkSize, int targetQubit);
 static int getChunkIdFromIndex(Qureg qureg, long long int index);
 
+int getChunkIdFromIndex(Qureg qureg, long long int index){
+  return index/qureg.numAmpsPerChunk; // this is numAmpsPerChunk
+}
+
 QuESTEnv createQuESTEnv(void) {
+  // phase 1 done!
   // Local version is similar to cpu_local version. +yh
+
+  if (!GPUExists()){
+    printf("Trying to run GPU code with no GPU available\n");
+    exit(EXIT_FAILURE);
+  }
+
   QuESTEnv env;
 
   // init MPI environment
   int rank, numRanks, initialized;
   MPI_Initialized(&initialized);
   if (!initialized){
-      MPI_Init(NULL, NULL);
-      MPI_Comm_size(MPI_COMM_WORLD, &numRanks);
-      MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-      env.rank=rank;
-      env.numRanks=numRanks;
+    MPI_Init(NULL, NULL);
+    MPI_Comm_size(MPI_COMM_WORLD, &numRanks);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+    env.rank=rank;
+    env.numRanks=numRanks;
+    mpi4cudaAllocateOneGPUPerProcess();
 
   } else {
 
-      printf("ERROR: Trying to initialize QuESTEnv multiple times. Ignoring...\n");
+    printf("ERROR: Trying to initialize QuESTEnv multiple times. Ignoring...\n");
 
-      // ensure env is initialised anyway, so the compiler is happy
-      MPI_Comm_size(MPI_COMM_WORLD, &numRanks);
-      MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-      env.rank=rank;
-      env.numRanks=numRanks;
-}
+    // ensure env is initialised anyway, so the compiler is happy
+    MPI_Comm_size(MPI_COMM_WORLD, &numRanks);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    env.rank=rank;
+    env.numRanks=numRanks;
 
-seedQuESTDefault();
+  }
+
+  seedQuESTDefault();
 
   return env;
 }
 
 void syncQuESTEnv(QuESTEnv env){
+  // phase 1 done!
+  // After computation in GPU device is done, synchronize MPI message. 
+  cudaDeviceSynchronize();
   MPI_Barrier(MPI_COMM_WORLD);
 }
 
 int syncQuESTSuccess(int successCode){
+  // phase 1 done!
+  // nothing to do for GPU method.
   int totalSuccess;
   MPI_Allreduce(&successCode, &totalSuccess, 1, MPI_INT, MPI_LAND, MPI_COMM_WORLD);
   return totalSuccess;
 }
 
 void destroyQuESTEnv(QuESTEnv env){
+  // phase 1 done!
+  // need to finalize nccl jobs.
+
+  mpi4cudaFinalizeNCCL();
+
   int finalized;
   MPI_Finalized(&finalized);
   if (!finalized) MPI_Finalize();
@@ -152,36 +188,44 @@ void destroyQuESTEnv(QuESTEnv env){
 }
 
 void reportQuESTEnv(QuESTEnv env){
+  // phase 1 done!
+  // maybe nothing to do.
   printf("EXECUTION ENVIRONMENT:\n");
   printf("Running locally on one node with GPU\n");
   printf("Number of ranks is %d\n", env.numRanks);
-# ifdef _OPENMP
+  # ifdef _OPENMP
   printf("OpenMP enabled\n");
   printf("Number of threads available is %d\n", omp_get_max_threads());
-# else
+  # else
   printf("OpenMP disabled\n");
-# endif
-}
-
-int getChunkIdFromIndex(Qureg qureg, long long int index){
-  return index/qureg.numAmpsPerChunk; // this is numAmpsPerChunk
+  # endif
 }
 
 qreal statevec_getRealAmp(Qureg qureg, long long int index){
+  // phase 1 done! (mode 3)
+  // direct copy from device state memory
+
   int chunkId = getChunkIdFromIndex(qureg, index);
-  qreal el;
+  qreal el=0;
   if (qureg.chunkId==chunkId){
-      el = qureg.stateVec.real[index-chunkId*qureg.numAmpsPerChunk];
+      // el = qureg.stateVec.real[index-chunkId*qureg.numAmpsPerChunk];
+      cudaMemcpy(&el, &(qureg.deviceStateVec.real[index-chunkId*qureg.numAmpsPerChunk]), 
+        sizeof(*(qureg.deviceStateVec.real)), cudaMemcpyDeviceToHost);
   }
   MPI_Bcast(&el, 1, MPI_QuEST_REAL, chunkId, MPI_COMM_WORLD);
   return el;
 }
 
 qreal statevec_getImagAmp(Qureg qureg, long long int index){
+  // phase 1 done! (mode 3)
+  // direct copy from device state memory
+
   int chunkId = getChunkIdFromIndex(qureg, index);
-  qreal el;
+  qreal el=0;
   if (qureg.chunkId==chunkId){
-      el = qureg.stateVec.imag[index-chunkId*qureg.numAmpsPerChunk];
+      //el = qureg.stateVec.imag[index-chunkId*qureg.numAmpsPerChunk];
+      cudaMemcpy(&el, &(qureg.deviceStateVec.imag[index-chunkId*qureg.numAmpsPerChunk]), 
+        sizeof(*(qureg.deviceStateVec.imag)), cudaMemcpyDeviceToHost);
   }
   MPI_Bcast(&el, 1, MPI_QuEST_REAL, chunkId, MPI_COMM_WORLD);
   return el;
@@ -392,11 +436,15 @@ void copyVecIntoMatrixPairState(Qureg matr, Qureg vec) {
 /********************************************/
 
 qreal densmatr_calcFidelity(Qureg qureg, Qureg pureState) {
-
-  // +yh concern about cpu_local version
+  // phase 1 undone!!!!!!!!
+  // concern about cpu_local version +yh
   // !!copyVecIntoMatrixPairState
 
   // set qureg's pairState is to be the full pureState (on every node)
+  // this function call is same with cpu local like below: +yh
+  // 1. save pointers to qureg's pair state
+  // 2. populate qureg pair state with pure state (by repointing)
+  // 3. restore pointers
   copyVecIntoMatrixPairState(qureg, pureState);
 
   // collect calcFidelityLocal by every machine
@@ -410,7 +458,8 @@ qreal densmatr_calcFidelity(Qureg qureg, Qureg pureState) {
 }
 
 qreal densmatr_calcHilbertSchmidtDistance(Qureg a, Qureg b) {
-  // !!care here
+  // phase 1 done! (mode1)
+  // gpu local function was modified.
   qreal localSum = densmatr_calcHilbertSchmidtDistanceSquaredLocal(a, b);
 
   qreal globalSum;
@@ -421,7 +470,8 @@ qreal densmatr_calcHilbertSchmidtDistance(Qureg a, Qureg b) {
 }
 
 qreal densmatr_calcInnerProduct(Qureg a, Qureg b) {
-  // !!simple
+  // phase 1 done! (mode1)
+  // cpu local wrapper function just return local call.
   qreal localSum = densmatr_calcInnerProductLocal(a, b);
 
   qreal globalSum;
@@ -432,6 +482,9 @@ qreal densmatr_calcInnerProduct(Qureg a, Qureg b) {
 }
 
 void densmatr_initPureState(Qureg targetQureg, Qureg copyQureg) {
+  // phase 1 undone!!!!!!!!
+  // similar to densmatr_calcFidelity.
+  // concern about cpu_local version +yh
   // !!copyVecIntoMatrixPairState
 
   if (targetQureg.numChunks==1){
@@ -581,7 +634,7 @@ void compressPairVectorForSingleQubitDepolarise(Qureg qureg, const int targetQub
           thisIndex = thisOuterColumn*sizeOuterColumn + thisInnerBlock*sizeInnerBlock
               + thisIndexInInnerBlock;
           // check if we are in the upper or lower half of an outer block
-          outerBit = extractBit(targetQubit, (thisIndex+qureg.numAmpsPerChunk*qureg.chunkId)>>qureg.numQubitsRepresented);
+          outerBit = extractBitOnCPU(targetQubit, (thisIndex+qureg.numAmpsPerChunk*qureg.chunkId)>>qureg.numQubitsRepresented);
           // if we are in the lower half of an outer block, shift to be in the lower half
           // of the inner block as well (we want to dephase |0><0| and |1><1| only)
           thisIndex += outerBit*(sizeInnerHalfBlock);
@@ -663,13 +716,13 @@ void compressPairVectorForTwoQubitDepolarise(Qureg qureg, const int targetQubit,
               + thisInnerBlockQ1InInnerBlockQ2*sizeInnerBlockQ1 + thisIndexInInnerBlockQ1;
 
           // check if we are in the upper or lower half of an outer block for Q1
-          outerBitQ1 = extractBit(targetQubit, (thisIndex+qureg.numAmpsPerChunk*qureg.chunkId)>>qureg.numQubitsRepresented);
+          outerBitQ1 = extractBitOnCPU(targetQubit, (thisIndex+qureg.numAmpsPerChunk*qureg.chunkId)>>qureg.numQubitsRepresented);
           // if we are in the lower half of an outer block, shift to be in the lower half
           // of the inner block as well (we want to dephase |0><0| and |1><1| only)
           thisIndex += outerBitQ1*(sizeInnerHalfBlockQ1);
 
           // check if we are in the upper or lower half of an outer block for Q2
-          outerBitQ2 = extractBit(qubit2, (thisIndex+qureg.numAmpsPerChunk*qureg.chunkId)>>qureg.numQubitsRepresented);
+          outerBitQ2 = extractBitOnCPU(qubit2, (thisIndex+qureg.numAmpsPerChunk*qureg.chunkId)>>qureg.numQubitsRepresented);
           // if we are in the lower half of an outer block, shift to be in the lower half
           // of the inner block as well (we want to dephase |0><0| and |1><1| only)
           thisIndex += outerBitQ2*(sizeInnerQuarterBlockQ2<<1);
@@ -752,7 +805,7 @@ void densmatr_mixDepolarisingDistributed(Qureg qureg, const int targetQubit, qre
           thisIndex = thisOuterColumn*sizeOuterColumn + thisInnerBlock*sizeInnerBlock
               + thisIndexInInnerBlock;
           // check if we are in the upper or lower half of an outer block
-          outerBit = extractBit(targetQubit, (thisIndex+qureg.numAmpsPerChunk*qureg.chunkId)>>qureg.numQubitsRepresented);
+          outerBit = extractBitOnCPU(targetQubit, (thisIndex+qureg.numAmpsPerChunk*qureg.chunkId)>>qureg.numQubitsRepresented);
           // if we are in the lower half of an outer block, shift to be in the lower half
           // of the inner block as well (we want to dephase |0><0| and |1><1| only)
           thisIndex += outerBit*(sizeInnerHalfBlock);
@@ -828,7 +881,7 @@ void densmatr_mixDampingDistributed(Qureg qureg, const int targetQubit, qreal da
           thisIndex = thisOuterColumn*sizeOuterColumn + thisInnerBlock*sizeInnerBlock
               + thisIndexInInnerBlock;
           // check if we are in the upper or lower half of an outer block
-          outerBit = extractBit(targetQubit, (thisIndex+qureg.numAmpsPerChunk*qureg.chunkId)>>qureg.numQubitsRepresented);
+          outerBit = extractBitOnCPU(targetQubit, (thisIndex+qureg.numAmpsPerChunk*qureg.chunkId)>>qureg.numQubitsRepresented);
           // if we are in the lower half of an outer block, shift to be in the lower half
           // of the inner block as well (we want to dephase |0><0| and |1><1| only)
           thisIndex += outerBit*(sizeInnerHalfBlock);
@@ -840,7 +893,7 @@ void densmatr_mixDampingDistributed(Qureg qureg, const int targetQubit, qreal da
 
           // Extract state bit, is 0 if thisIndex corresponds to a state with 0 in the target qubit
           // and is 1 if thisIndex corresponds to a state with 1 in the target qubit
-          stateBit = extractBit(targetQubit, (thisIndex+qureg.numAmpsPerChunk*qureg.chunkId));
+          stateBit = extractBitOnCPU(targetQubit, (thisIndex+qureg.numAmpsPerChunk*qureg.chunkId));
 
           // state[thisIndex] = (1-depolLevel)*state[thisIndex] + depolLevel*(state[thisIndex]
           //      + pair[thisTask])/2
@@ -1590,14 +1643,14 @@ void seedQuESTDefault(){
   long long int chunkEndInd = chunkStartInd + qureg.numAmpsPerChunk; // exclusive
   long long int oddParityInd;
 
-  if (extractBit(qb1, chunkStartInd) != extractBit(qb2, chunkStartInd))
+  if (extractBitOnCPU(qb1, chunkStartInd) != extractBitOnCPU(qb2, chunkStartInd))
       return chunkStartInd;
 
-  oddParityInd = flipBit(chunkStartInd, qb1);
+  oddParityInd = flipBitOnCPU(chunkStartInd, qb1);
   if (oddParityInd >= chunkStartInd && oddParityInd < chunkEndInd)
       return oddParityInd;
 
-  oddParityInd = flipBit(chunkStartInd, qb2);
+  oddParityInd = flipBitOnCPU(chunkStartInd, qb2);
   if (oddParityInd >= chunkStartInd && oddParityInd < chunkEndInd)
       return oddParityInd;
 
@@ -1626,7 +1679,7 @@ void statevec_swapQubitAmps(Qureg qureg, int qb1, int qb2) {
       return;
 
   // determine and swap amps with pair node
-  int pairRank = flipBit(flipBit(oddParityGlobalInd, qb1), qb2) / qureg.numAmpsPerChunk;
+  int pairRank = flipBitOnCPU(flipBitOnCPU(oddParityGlobalInd, qb1), qb2) / qureg.numAmpsPerChunk;
   exchangeStateVectors(qureg, pairRank);
   statevec_swapQubitAmpsDistributed(qureg, pairRank, qb1, qb2);
 }
@@ -1684,13 +1737,16 @@ void statevec_swapQubitAmps(Qureg qureg, int qb1, int qb2) {
  void statevec_multiControlledMultiQubitUnitary(Qureg qureg, long long int ctrlMask, int* targs, const int numTargs, ComplexMatrixN u) {
 
   //!!simple return in cpu_local
+  // only these functions are related to gpu process:
+  // statevec_swapQubitAmps()
+  // statevec_multiControlledMultiQubitUnitaryLocal()
 
   // bit mask of target qubits (for quick collision checking)
   long long int targMask = getQubitBitMask(targs, numTargs);
 
   // find lowest qubit available for swapping (isn't in targs)
   int freeQb=0;
-  while (maskContainsBit(targMask, freeQb))
+  while (maskContainsBitOnCPU(targMask, freeQb))
       freeQb++;
 
   // assign indices of where each target will be swapped to (else itself)
@@ -1703,12 +1759,12 @@ void statevec_swapQubitAmps(Qureg qureg, int qb1, int qb2) {
           swapTargs[t] = freeQb;
 
           // update ctrlMask if swapped-out qubit was a control
-          if (maskContainsBit(ctrlMask, swapTargs[t]))
-              ctrlMask = flipBit(flipBit(ctrlMask, swapTargs[t]), targs[t]); // swap targ and ctrl
+          if (maskContainsBitOnCPU(ctrlMask, swapTargs[t]))
+              ctrlMask = flipBitOnCPU(flipBitOnCPU(ctrlMask, swapTargs[t]), targs[t]); // swap targ and ctrl
 
           // locate next available on-chunk qubit
           freeQb++;
-          while (maskContainsBit(targMask, freeQb))
+          while (maskContainsBitOnCPU(targMask, freeQb))
               freeQb++;
       }
   }
