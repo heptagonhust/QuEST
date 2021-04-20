@@ -1724,7 +1724,7 @@ void statevec_compactUnitaryLocalSIMD (Qureg qureg, const int targetQubit, Compl
 
 
 # ifdef _OPENMP
-    if(numTasks >= omp_get_num_threads()){
+    if(numTasks >= omp_get_max_threads()){
 # pragma omp parallel \
     shared   (stateVecReal,stateVecImag, alphaRealSIMD,alphaImagSIMD, betaRealSIMD,betaImagSIMD) \
     private  (thisTask,indexUp,indexLo, stateRealUpSIMD,stateImagUpSIMD,stateRealLoSIMD,stateImagLoSIMD)
@@ -2344,7 +2344,7 @@ void statevec_controlledCompactUnitaryLocalAllSmallSIMD (Qureg qureg, const int 
     register const __m256d betaImagSIMD = _mm256_set1_pd(betaImag); 
 
 # ifdef _OPENMP
-    if(numTasks >= omp_get_num_threads()){
+    if(numTasks >= omp_get_max_threads()){
 # pragma omp parallel \
     shared   (stateVecReal,stateVecImag,alphaRealSIMD,alphaImagSIMD, betaRealSIMD,betaImagSIMD) \
     private  (thisTask,indexUp,indexLo,stateRealUpSIMD,stateImagUpSIMD,stateRealLoSIMD,stateImagLoSIMD)
@@ -2484,7 +2484,7 @@ void statevec_controlledCompactUnitaryLocalAllSmall (Qureg qureg, const int cont
     qreal betaImag=beta.imag, betaReal=beta.real;
 
 # ifdef _OPENMP
-    if(numTasks >= omp_get_num_threads()){
+    if(numTasks >= omp_get_max_threads()){
 # pragma omp parallel \
     shared   (stateVecReal,stateVecImag) \
     private  (thisTask,indexUp,indexLo, stateRealUp,stateImagUp)
@@ -2657,7 +2657,7 @@ void statevec_controlledCompactUnitaryLocalSmall (Qureg qureg, const int control
     qreal betaImag=beta.imag, betaReal=beta.real;
 
 # ifdef _OPENMP
-    if(numBlocks >= omp_get_num_threads()){
+    if(numBlocks >= omp_get_max_threads()){
 # pragma omp parallel \
     shared   (sizeBlock,sizeHalfBlock, stateVecReal,stateVecImag, alphaReal,alphaImag, betaReal,betaImag) \
     private  (thisTask,thisBlock ,indexUp,indexLo, stateRealUp,stateImagUp,stateRealLo,stateImagLo)
@@ -2777,7 +2777,7 @@ void statevec_controlledCompactUnitaryLocalSIMD (Qureg qureg, const int controlQ
     register const __m256d betaImagSIMD = _mm256_set1_pd(betaImag);
     
 # ifdef _OPENMP
-    if(numBlocks >= omp_get_num_threads()){
+    if(numBlocks >= omp_get_max_threads()){
 # pragma omp parallel \
     shared   (sizeBlock,sizeHalfBlock, stateVecReal,stateVecImag, alphaRealSIMD,alphaImagSIMD, betaRealSIMD,betaImagSIMD) \
     private  (thisTask,thisBlock ,indexUp,indexLo, stateRealUpSIMD,stateImagUpSIMD,stateRealLoSIMD,stateImagLoSIMD)
@@ -3323,7 +3323,7 @@ void statevec_controlledCompactUnitaryDistributedSIMD (Qureg qureg, const int co
     register const __m256d rot2ImagSIMD = _mm256_set1_pd(rot2Imag);
 
 # ifdef _OPENMP
-    if(blockRange >= omp_get_num_threads()){
+    if(blockRange >= omp_get_max_threads()){
 # pragma omp parallel \
     shared   (stateVecRealUp,stateVecImagUp,stateVecRealLo,stateVecImagLo,stateVecRealOut,stateVecImagOut, \
             rot1RealSIMD,rot1ImagSIMD, rot2RealSIMD,rot2ImagSIMD) \
@@ -3525,7 +3525,7 @@ void statevec_pauliXLocalSmall(Qureg qureg, const int targetQubit)
     qreal *stateVecImag = qureg.stateVec.imag;
 
 # ifdef _OPENMP
-    if(numTasks >= omp_get_num_threads()){
+    if(numTasks >= omp_get_max_threads()){
 # pragma omp parallel \
     shared   (stateVecReal,stateVecImag) \
     private  (thisTask,indexUp,indexLo, stateRealUp,stateImagUp)
@@ -3731,7 +3731,7 @@ void statevec_controlledNotLocalSmall(Qureg qureg, const int controlQubit, const
     qreal *stateVecImag = qureg.stateVec.imag;
 
 # ifdef _OPENMP
-    if(numBlocks >= omp_get_num_threads()) {
+    if(numBlocks >= omp_get_max_threads()) {
 # pragma omp parallel \
     shared   (sizeBlock,sizeHalfBlock, stateVecReal,stateVecImag,blockOffset) \
     private  (thisTask,thisBlock ,indexUp,indexLo, stateRealUp,stateImagUp)
@@ -4260,7 +4260,7 @@ void statevec_hadamardLocalSIMD(Qureg qureg, const int targetQubit)
     register const __m256d recRoot2SIMD = _mm256_set1_pd(recRoot2);
 
 # ifdef _OPENMP
-    if(numTasks >= omp_get_num_threads()){
+    if(numTasks >= omp_get_max_threads()){
 # pragma omp parallel \
     shared   (stateVecReal,stateVecImag, recRoot2SIMD) \
     private  (thisTask,indexUp,indexLo, stateRealUpSIMD,stateImagUpSIMD,stateRealLoSIMD,stateImagLoSIMD)
@@ -4621,7 +4621,7 @@ void statevec_phaseShiftByTermSIMD (Qureg qureg, const int targetQubit, Complex 
     register const __m256d sinAngleSIMD = _mm256_set1_pd(term.imag);
 
 # ifdef _OPENMP
-    if(numTasks >= omp_get_num_threads()) {
+    if(numTasks >= omp_get_max_threads()) {
 # pragma omp parallel for \
     shared   (stateVecReal,stateVecImag ) \
     private  (index,stateRealLoSIMD,stateImagLoSIMD)             \
