@@ -2827,11 +2827,11 @@ void statevec_controlledCompactUnitaryLocalSIMD (Qureg qureg, const int controlQ
                     //stateVecReal[indexLo] = betaReal*stateRealUp - betaImag*stateImagUp
                     //    + alphaReal*stateRealLo + alphaImag*stateImagLo;
                     __m256d res3 = _mm256_mul_pd(betaRealSIMD,stateRealUpSIMD);
-                    res3 = _mm256_fnmadd_pd(betaImagSIMD, stateImagUpSIMD, res3)
+                    res3 = _mm256_fnmadd_pd(betaImagSIMD, stateImagUpSIMD, res3);
                     // res3 = _mm256_sub_pd(res3,_mm256_mul_pd(betaImagSIMD,stateImagUpSIMD));
-                    res3 = _mm256_fmadd_pd(alphaRealSIMD, stateRealLoSIMD, res3)
+                    res3 = _mm256_fmadd_pd(alphaRealSIMD, stateRealLoSIMD, res3);
                     // res3 = _mm256_add_pd(res3,_mm256_mul_pd(alphaRealSIMD,stateRealLoSIMD));
-                    res3 = _mm256_fmadd_pd(alphaImagSIMD, stateImagLoSIMD, res3)
+                    res3 = _mm256_fmadd_pd(alphaImagSIMD, stateImagLoSIMD, res3);
                     // res3 = _mm256_add_pd(res3,_mm256_mul_pd(alphaImagSIMD,stateImagLoSIMD));
 
                     //stateVecImag[indexLo] = betaReal*stateImagUp + betaImag*stateRealUp
