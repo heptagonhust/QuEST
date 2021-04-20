@@ -3894,6 +3894,7 @@ void statevec_pauliYLocalSmall(Qureg qureg, const int targetQubit, const int con
     qreal *stateVecImag = qureg.stateVec.imag;
 
 # ifdef _OPENMP
+    if(numTasks >= omp_get_max_threads()){
 # pragma omp parallel \
     shared   (stateVecReal,stateVecImag) \
     private  (thisTask,indexUp,indexLo, stateRealUp,stateImagUp)
@@ -3903,9 +3904,10 @@ void statevec_pauliYLocalSmall(Qureg qureg, const int targetQubit, const int con
 # pragma omp for schedule (static)
 # endif
         for (thisTask = 0; thisTask < numTasks; ++thisTask)
-        for (indexUp = thisTask * sizeTask * 2; indexUp < thisTask * sizeTask * 2 + sizeTask; ++ indexUp) {
+          for (indexUp = thisTask * sizeTask * 2;
+               indexUp < thisTask * sizeTask * 2 + sizeTask; ++indexUp) {
 
-            indexLo     = indexUp + sizeTask;
+            indexLo = indexUp + sizeTask;
 
             stateRealUp = stateVecReal[indexUp];
             stateImagUp = stateVecImag[indexUp];
@@ -3914,8 +3916,32 @@ void statevec_pauliYLocalSmall(Qureg qureg, const int targetQubit, const int con
             stateVecImag[indexUp] = conjFac * -stateVecReal[indexLo];
             stateVecReal[indexLo] = conjFac * -stateImagUp;
             stateVecImag[indexLo] = conjFac * stateRealUp;
+          }
+    }
+#ifdef _OPENMP
+    } else {
+        for (thisTask = 0; thisTask < numTasks; ++thisTask)
+# pragma omp parallel \
+    shared   (stateVecReal,stateVecImag) \
+    private  (indexUp,indexLo, stateRealUp,stateImagUp)
+        {
+# pragma omp for schedule (static)
+          for (indexUp = thisTask * sizeTask * 2;
+               indexUp < thisTask * sizeTask * 2 + sizeTask; ++indexUp) {
+
+            indexLo = indexUp + sizeTask;
+
+            stateRealUp = stateVecReal[indexUp];
+            stateImagUp = stateVecImag[indexUp];
+
+            stateVecReal[indexUp] = conjFac * stateVecImag[indexLo];
+            stateVecImag[indexUp] = conjFac * -stateVecReal[indexLo];
+            stateVecReal[indexLo] = conjFac * -stateImagUp;
+            stateVecImag[indexLo] = conjFac * stateRealUp;
+          }
         }
     }
+# endif
 }
 
 void statevec_pauliYLocal(Qureg qureg, const int targetQubit, const int conjFac)
