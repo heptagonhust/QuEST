@@ -1734,66 +1734,86 @@ void statevec_compactUnitaryLocalSIMD (Qureg qureg, const int targetQubit, Compl
 # pragma omp for schedule (static)
 # endif
         for (thisTask = 0; thisTask < numTasks; ++thisTask)
-        for (indexUp = thisTask * sizeTask * 2; indexUp < thisTask * sizeTask * 2 + sizeTask; indexUp+=4) {
+          for (indexUp = thisTask * sizeTask * 2;
+               indexUp < thisTask * sizeTask * 2 + sizeTask; indexUp += 4) {
 
-            indexLo     = indexUp + sizeTask;
+            indexLo = indexUp + sizeTask;
 
             // store current state vector values in temp variables
-            stateRealUpSIMD = _mm256_loadu_pd(stateVecReal+indexUp);
-            stateImagUpSIMD = _mm256_loadu_pd(stateVecImag+indexUp);
-            stateRealLoSIMD = _mm256_loadu_pd(stateVecReal+indexLo);
-            stateImagLoSIMD = _mm256_loadu_pd(stateVecImag+indexLo);
+            stateRealUpSIMD = _mm256_loadu_pd(stateVecReal + indexUp);
+            stateImagUpSIMD = _mm256_loadu_pd(stateVecImag + indexUp);
+            stateRealLoSIMD = _mm256_loadu_pd(stateVecReal + indexLo);
+            stateImagLoSIMD = _mm256_loadu_pd(stateVecImag + indexLo);
 
-
-            // state[indexUp] = alpha * state[indexUp] - conj(beta)  * state[indexLo]
-            //stateVecReal[indexUp] = alphaReal*stateRealUp - alphaImag*stateImagUp
+            // state[indexUp] = alpha * state[indexUp] - conj(beta)  *
+            // state[indexLo]
+            // stateVecReal[indexUp] = alphaReal*stateRealUp -
+            // alphaImag*stateImagUp
             //    - betaReal*stateRealLo - betaImag*stateImagLo;
-            __m256d res1 =  _mm256_mul_pd(alphaRealSIMD,stateRealUpSIMD);
+            __m256d res1 = _mm256_mul_pd(alphaRealSIMD, stateRealUpSIMD);
             res1 = _mm256_fnmsub_pd(alphaImagSIMD, stateImagUpSIMD, res1);
-            // res1 = _mm256_sub_pd(res1,_mm256_mul_pd(alphaImagSIMD,stateImagUpSIMD));
+            // res1 =
+            // _mm256_sub_pd(res1,_mm256_mul_pd(alphaImagSIMD,stateImagUpSIMD));
             res1 = _mm256_fnmsub_pd(res1, betaRealSIMD, stateRealLoSIMD);
-            // res1 = _mm256_sub_pd(res1,_mm256_mul_pd(betaRealSIMD,stateRealLoSIMD));
+            // res1 =
+            // _mm256_sub_pd(res1,_mm256_mul_pd(betaRealSIMD,stateRealLoSIMD));
             res1 = _mm256_fnmsub_pd(res1, betaImagSIMD, stateImagLoSIMD);
-            // res1 = _mm256_sub_pd(res1,_mm256_mul_pd(betaImagSIMD,stateImagLoSIMD));
+            // res1 =
+            // _mm256_sub_pd(res1,_mm256_mul_pd(betaImagSIMD,stateImagLoSIMD));
 
-
-            //stateVecImag[indexUp] = alphaReal*stateImagUp + alphaImag*stateRealUp
+            // stateVecImag[indexUp] = alphaReal*stateImagUp +
+            // alphaImag*stateRealUp
             //    - betaReal*stateImagLo + betaImag*stateRealLo;
-            __m256d res2 =  _mm256_mul_pd(alphaRealSIMD,stateImagUpSIMD);
+            __m256d res2 = _mm256_mul_pd(alphaRealSIMD, stateImagUpSIMD);
             res2 = _mm256_fmadd_pd(res2, alphaImagSIMD, stateRealUpSIMD);
-            // res2 = _mm256_add_pd(res2,_mm256_mul_pd(alphaImagSIMD,stateRealUpSIMD));
+            // res2 =
+            // _mm256_add_pd(res2,_mm256_mul_pd(alphaImagSIMD,stateRealUpSIMD));
             res1 = _mm256_fnmsub_pd(res2, betaRealSIMD, stateImagLoSIMD);
-            // res2 = _mm256_sub_pd(res2,_mm256_mul_pd(betaRealSIMD,stateImagLoSIMD));
+            // res2 =
+            // _mm256_sub_pd(res2,_mm256_mul_pd(betaRealSIMD,stateImagLoSIMD));
             res2 = _mm256_fmadd_pd(res2, betaImagSIMD, stateRealLoSIMD);
-            // res2 = _mm256_add_pd(res2,_mm256_mul_pd(betaImagSIMD,stateRealLoSIMD));
+            // res2 =
+            // _mm256_add_pd(res2,_mm256_mul_pd(betaImagSIMD,stateRealLoSIMD));
 
-            // state[indexLo] = beta  * state[indexUp] + conj(alpha) * state[indexLo]
-            //stateVecReal[indexLo] = betaReal*stateRealUp - betaImag*stateImagUp
+            // state[indexLo] = beta  * state[indexUp] + conj(alpha) *
+            // state[indexLo]
+            // stateVecReal[indexLo] = betaReal*stateRealUp -
+            // betaImag*stateImagUp
             //    + alphaReal*stateRealLo + alphaImag*stateImagLo;
-            __m256d res3 = _mm256_mul_pd(betaRealSIMD,stateRealUpSIMD);
+            __m256d res3 = _mm256_mul_pd(betaRealSIMD, stateRealUpSIMD);
             res1 = _mm256_fnmsub_pd(res3, betaImagSIMD, stateImagUpSIMD);
-            // res3 = _mm256_sub_pd(res3,_mm256_mul_pd(betaImagSIMD,stateImagUpSIMD));
+            // res3 =
+            // _mm256_sub_pd(res3,_mm256_mul_pd(betaImagSIMD,stateImagUpSIMD));
             res2 = _mm256_fmadd_pd(res3, alphaRealSIMD, stateRealLoSIMD);
-            // res3 = _mm256_add_pd(res3,_mm256_mul_pd(alphaRealSIMD,stateRealLoSIMD));
+            // res3 =
+            // _mm256_add_pd(res3,_mm256_mul_pd(alphaRealSIMD,stateRealLoSIMD));
             res2 = _mm256_fmadd_pd(res3, alphaImagSIMD, stateImagLoSIMD);
-            // res3 = _mm256_add_pd(res3,_mm256_mul_pd(alphaImagSIMD,stateImagLoSIMD));
+            // res3 =
+            // _mm256_add_pd(res3,_mm256_mul_pd(alphaImagSIMD,stateImagLoSIMD));
 
-            //stateVecImag[indexLo] = betaReal*stateImagUp + betaImag*stateRealUp
+            // stateVecImag[indexLo] = betaReal*stateImagUp +
+            // betaImag*stateRealUp
             //    + alphaReal*stateImagLo - alphaImag*stateRealLo;
-            __m256d res4 = _mm256_mul_pd(betaRealSIMD,stateImagUpSIMD);
+            __m256d res4 = _mm256_mul_pd(betaRealSIMD, stateImagUpSIMD);
             res2 = _mm256_fmadd_pd(res4, betaImagSIMD, stateRealUpSIMD);
-            // res4 = _mm256_add_pd(res4,_mm256_mul_pd(betaImagSIMD,stateRealUpSIMD));
+            // res4 =
+            // _mm256_add_pd(res4,_mm256_mul_pd(betaImagSIMD,stateRealUpSIMD));
             res2 = _mm256_fmadd_pd(res4, alphaRealSIMD, stateImagLoSIMD);
-            // res4 = _mm256_add_pd(res4,_mm256_mul_pd(alphaRealSIMD,stateImagLoSIMD));
+            // res4 =
+            // _mm256_add_pd(res4,_mm256_mul_pd(alphaRealSIMD,stateImagLoSIMD));
             res1 = _mm256_fnmsub_pd(res4, alphaImagSIMD, stateRealLoSIMD);
-            // res4 = _mm256_sub_pd(res4,_mm256_mul_pd(alphaImagSIMD,stateRealLoSIMD));
+            // res4 =
+            // _mm256_sub_pd(res4,_mm256_mul_pd(alphaImagSIMD,stateRealLoSIMD));
 
-            _mm256_storeu_pd(stateVecReal+indexUp,res1);
-            _mm256_storeu_pd(stateVecImag+indexUp,res2);
-            _mm256_storeu_pd(stateVecReal+indexLo,res3);
-            _mm256_storeu_pd(stateVecImag+indexLo,res4);
-        }
+            _mm256_storeu_pd(stateVecReal + indexUp, res1);
+            _mm256_storeu_pd(stateVecImag + indexUp, res2);
+            _mm256_storeu_pd(stateVecReal + indexLo, res3);
+            _mm256_storeu_pd(stateVecImag + indexLo, res4);
+          }
     }
+#ifdef _OPENMP
+    }
+#endif
 // # ifdef _OPENMP
 //     } else { 
 //         for (thisTask = 0; thisTask < numTasks; ++thisTask)
