@@ -1,0 +1,3 @@
+[submodule "QuEST/src/GPU/cuMPI"]
+	path = QuEST/src/GPU/cuMPI
+	url = git@github.com-cuMPI:ueqri/cuMPI.git

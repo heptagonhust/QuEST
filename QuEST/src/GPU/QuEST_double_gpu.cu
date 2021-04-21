@@ -1,5 +1,18 @@
 #include "QuEST_gpu_local.cu"
 #include "QuEST_gpu.h"
+#include "cuMPI_runtime.h"
+
+/********************** For cuMPI environment **********************/
+int myRank;                 // cuMPI comm local ranks
+int nRanks;                 // total cuMPI comm ranks
+int localRank;              // CUDA device ID
+
+ncclUniqueId id;            // NCCL Unique ID
+cuMPI_Comm comm;            // cuMPI comm
+cudaStream_t defaultStream; // CUDA stream generated for each GPU
+uint64_t hostHashs[10];     // host name hash in cuMPI
+char hostname[1024];        // host name for identification in cuMPI
+/*******************************************************************/
 
 //cudampiinit
 //cudaAllreduce
@@ -11,7 +24,7 @@ void copyStateFromCurrentGPU(Qureg qureg){
 }
 
 Complex statevec_calcInnerProduct(Qureg bra, Qureg ket) {
-  // phase 1 done! (mode 1)
+  // stage 1 done! (mode 1)
 
   Complex localInnerProd = statevec_calcInnerProductLocal(bra, ket);
   if (bra.numChunks == 1)
@@ -20,8 +33,8 @@ Complex statevec_calcInnerProduct(Qureg bra, Qureg ket) {
   qreal localReal = localInnerProd.real;
   qreal localImag = localInnerProd.imag;
   qreal globalReal, globalImag;
-  MPI_Allreduce(&localReal, &globalReal, 1, MPI_QuEST_REAL, MPI_SUM, MPI_COMM_WORLD);
-  MPI_Allreduce(&localImag, &globalImag, 1, MPI_QuEST_REAL, MPI_SUM, MPI_COMM_WORLD);
+  cuMPI_Allreduce(&localReal, &globalReal, 1, cuMPI_QuEST_REAL, cuMPI_SUM, cuMPI_COMM_WORLD);
+  cuMPI_Allreduce(&localImag, &globalImag, 1, cuMPI_QuEST_REAL, cuMPI_SUM, cuMPI_COMM_WORLD);
 
   Complex globalInnerProd;
   globalInnerProd.real = globalReal;
@@ -132,12 +145,12 @@ QuESTEnv createQuESTEnv(void) {
 
   // init MPI environment
   int rank, numRanks, initialized;
-  MPI_Initialized(&initialized);
+  cuMPI_Initialized(&initialized);
   if (!initialized){
 
-    MPI_Init(NULL, NULL);
-    MPI_Comm_size(MPI_COMM_WORLD, &numRanks);
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    cuMPI_Init(NULL, NULL);
+    cuMPI_Comm_size(MPI_COMM_WORLD, &numRanks);
+    cuMPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
     env.rank=rank;
     env.numRanks=numRanks;
@@ -1223,8 +1236,79 @@ void statevec_unitary(Qureg qureg, const int targetQubit, ComplexMatrix2 u)
   }
 }
 
+__global__ void statevec_controlledCompactUnitaryDistributedKernel (
+  Qureg qureg, const int controlQubit,
+  Complex rot1, Complex rot2,
+  ComplexArray deviceStateVecUp,
+  ComplexArray deviceStateVecLo,
+  ComplexArray deviceStateVecOut
+){
+  qreal   stateRealUp,stateRealLo,stateImagUp,stateImagLo;
+  long long int thisTask = blockIdx.x*blockDim.x + threadIdx.x;
+  const long long int numTasks=qureg.numAmpsPerChunk;
+
+  if (thisTask>=numTasks) return;
+
+  const long long int chunkSize=qureg.numAmpsPerChunk;
+  const long long int chunkId=qureg.chunkId;
+
+  qreal rot1Real=rot1.real, rot1Imag=rot1.imag;
+  qreal rot2Real=rot2.real, rot2Imag=rot2.imag;
+  qreal *stateVecRealUp=deviceStateVecUp.real, *stateVecImagUp=deviceStateVecUp.imag;
+  qreal *stateVecRealLo=deviceStateVecLo.real, *stateVecImagLo=deviceStateVecLo.imag;
+  qreal *stateVecRealOut=deviceStateVecOut.real, *stateVecImagOut=deviceStateVecOut.imag;
+
+  int controlBit = extractBit (controlQubit, thisTask+chunkId*chunkSize);
+  if (controlBit){
+      // store current state vector values in temp variables
+      stateRealUp = stateVecRealUp[thisTask];
+      stateImagUp = stateVecImagUp[thisTask];
+
+      stateRealLo = stateVecRealLo[thisTask];
+      stateImagLo = stateVecImagLo[thisTask];
+
+      // state[indexUp] = alpha * state[indexUp] - conj(beta)  * state[indexLo]
+      stateVecRealOut[thisTask] = rot1Real*stateRealUp - rot1Imag*stateImagUp + rot2Real*stateRealLo + rot2Imag*stateImagLo;
+      stateVecImagOut[thisTask] = rot1Real*stateImagUp + rot1Imag*stateRealUp + rot2Real*stateImagLo - rot2Imag*stateRealLo;
+  }
+}
+
+/** Rotate a single qubit in the state vector of probability amplitudes, given two complex 
+ * numbers alpha and beta and a subset of the state vector with upper and lower block values 
+ * stored seperately. Only perform the rotation where the control qubit is one.
+ *                                               
+ *  @param[in,out] qureg object representing the set of qubits
+ *  @param[in] controlQubit qubit to determine whether or not to perform a rotation 
+ *  @param[in] rot1 rotation angle
+ *  @param[in] rot2 rotation angle
+ *  @param[in] stateVecUp probability amplitudes in upper half of a block
+ *  @param[in] stateVecLo probability amplitudes in lower half of a block
+ *  @param[out] stateVecOut array section to update (will correspond to either the lower or upper half of a block)
+ */
+ void statevec_controlledCompactUnitaryDistributed (Qureg qureg, const int controlQubit,
+  Complex rot1, Complex rot2,
+  ComplexArray stateVecUp,
+  ComplexArray stateVecLo,
+  ComplexArray stateVecOut)
+{
+  assert(isReadyOnGPU(qureg));
+  int threadsPerCUDABlock, CUDABlocks;
+  threadsPerCUDABlock = 128;
+  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);
+  statevec_controlledCompactUnitaryDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
+    qureg, 
+    controlQubit, 
+    rot1,
+    rot2, 
+    stateVecUp, 
+    stateVecLo,
+    stateVecOut
+  );
+}
+
 void statevec_controlledCompactUnitary(Qureg qureg, const int controlQubit, const int targetQubit, Complex alpha, Complex beta)
 {
+  // stage 1 done! need to optimize!
 
   //!!simple in local_cpu
 
@@ -1238,9 +1322,7 @@ void statevec_controlledCompactUnitary(Qureg qureg, const int controlQubit, cons
 
   if (useLocalDataOnly){
     // all values required to update state vector lie in this rank
-    statevec_controlledCompactUnitaryLocalSmall(qureg, controlQubit, targetQubit, alpha, beta);
-    //statevec_controlledCompactUnitaryLocal(qureg, controlQubit, targetQubit, alpha, beta);
-
+    statevec_controlledCompactUnitaryLocal(qureg, controlQubit, targetQubit, alpha, beta);
   } else {
     // need to get corresponding chunk of state vector from other rank
     rankIsUpper = chunkIsUpper(qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);
@@ -1618,8 +1700,53 @@ void statevec_pauliYConj(Qureg qureg, const int targetQubit)
   }
 }
 
+__global__ void statevec_controlledPauliYDistributedKernel (
+  Qureg qureg, 
+  const int controlQubit,
+  ComplexArray deviceStateVecIn,
+  ComplexArray deviceStateVecOut, 
+  const int conjFac
+){
+  long long int thisTask = blockIdx.x*blockDim.x + threadIdx.x; 
+  const long long int numTasks=qureg.numAmpsPerChunk;
+
+  if (thisTask>=numTasks) return;
+
+  const long long int chunkSize=qureg.numAmpsPerChunk;
+  const long long int chunkId=qureg.chunkId;
+  
+  qreal *stateVecRealIn=deviceStateVecIn.real, *stateVecImagIn=deviceStateVecIn.imag;
+  qreal *stateVecRealOut=deviceStateVecOut.real, *stateVecImagOut=deviceStateVecOut.imag;
+  
+  int controlBit = extractBit (controlQubit, thisTask+chunkId*chunkSize);
+  if (controlBit){
+      stateVecRealOut[thisTask] = conjFac * stateVecImagIn[thisTask];
+      stateVecImagOut[thisTask] = conjFac * -stateVecRealIn[thisTask];
+  }
+}
+
+void statevec_controlledPauliYDistributed (Qureg qureg, const int controlQubit,
+  ComplexArray stateVecIn,
+  ComplexArray stateVecOut, const int conjFac)
+{
+  assert(isReadyOnGPU(qureg));
+  int threadsPerCUDABlock, CUDABlocks;
+  threadsPerCUDABlock = 128;
+  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);
+  statevec_controlledPauliYDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
+    qureg, 
+    controlQubit,
+    stateVecIn, 
+    stateVecOut,
+    conjFac
+  );
+} 
+
 void statevec_controlledPauliY(Qureg qureg, const int controlQubit, const int targetQubit)
 {
+  // stage 1 done! need to optimize!
+
+  // 20210420, conjLocal & Local can merge into one in local gpu!
   //!!care about code of local_cpu below:
   //int conjFac = 1;
 
@@ -1632,8 +1759,7 @@ void statevec_controlledPauliY(Qureg qureg, const int controlQubit, const int ta
 
   if (useLocalDataOnly){
     // all values required to update state vector lie in this rank
-    // statevec_controlledPauliYLocal(qureg, controlQubit, targetQubit, conjFac);
-    statevec_controlledPauliYLocalSmall(qureg, controlQubit, targetQubit, conjFac);
+    statevec_controlledPauliYLocal(qureg, controlQubit, targetQubit);
   } else {
     // need to get corresponding chunk of state vector from other rank
     rankIsUpper = chunkIsUpper(qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);
@@ -1657,6 +1783,9 @@ void statevec_controlledPauliY(Qureg qureg, const int controlQubit, const int ta
 
 void statevec_controlledPauliYConj(Qureg qureg, const int controlQubit, const int targetQubit)
 {
+  // stage 1 done! need to optimize!
+
+  // 20210420, conjLocal & Local can merge into one in local gpu!
   //!!care about the code of local_cpu blow:
   //int conjFac = -1;
 
@@ -1669,8 +1798,7 @@ void statevec_controlledPauliYConj(Qureg qureg, const int controlQubit, const in
 
   if (useLocalDataOnly){
     // all values required to update state vector lie in this rank
-    // statevec_controlledPauliYLocal(qureg, controlQubit, targetQubit, conjFac);
-    statevec_controlledPauliYLocalSmall(qureg, controlQubit, targetQubit, conjFac);
+    statevec_controlledPauliYConjLocal(qureg, controlQubit, targetQubit);
   } else {
     // need to get corresponding chunk of state vector from other rank
     rankIsUpper = chunkIsUpper(qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);
