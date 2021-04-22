@@ -182,7 +182,8 @@ typedef struct Qureg
     ComplexArray pairStateVec;
     
     //! Storage for wavefunction amplitudes in the GPU version
-    ComplexArray deviceStateVec;
+    // modified memory allocation strategy for GPU version. 2021.04.22
+    // ComplexArray deviceStateVec;
     //! Storage for reduction of probabilities on GPU
     qreal *firstLevelReduction, *secondLevelReduction;
 

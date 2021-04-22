@@ -133,6 +133,26 @@ int getChunkIdFromIndex(Qureg qureg, long long int index){
   return index/qureg.numAmpsPerChunk; // this is numAmpsPerChunk
 }
 
+int GPUExists(void){
+  // stage 1 done! need to integrate to cuMPI, and explict set certain device.
+
+  // there is nothing to do, maybe change it to CUDA API directly.
+  int deviceCount, device;
+  int gpuDeviceCount = 0;
+  struct cudaDeviceProp properties;
+  cudaError_t cudaResultCode = cudaGetDeviceCount(&deviceCount);
+  if (cudaResultCode != cudaSuccess) deviceCount = 0;
+  /* machines with no GPUs can still report one emulation device */
+  for (device = 0; device < deviceCount; ++device) {
+      cudaGetDeviceProperties(&properties, device);
+      if (properties.major != 9999) { /* 9999 means emulation only */
+          ++gpuDeviceCount;
+      }
+  }
+  if (gpuDeviceCount) return 1;
+  else return 0;
+}
+
 QuESTEnv createQuESTEnv(void) {
   // stage 1 done! changed to cuMPI.
   
@@ -1094,7 +1114,7 @@ void densmatr_mixTwoQubitDepolarising(Qureg qureg, int qubit1, int qubit2, qreal
 }
 
 __global__ void statevec_compactUnitaryDistributedKernel (
-  Qureg qureg,
+  const long long int chunkSize,
   Complex rot1, Complex rot2,
   ComplexArray deviceStateVecUp,
   ComplexArray deviceStateVecLo,
@@ -1102,7 +1122,7 @@ __global__ void statevec_compactUnitaryDistributedKernel (
 ){
   qreal   stateRealUp,stateRealLo,stateImagUp,stateImagLo;
   long long int thisTask = blockIdx.x*blockDim.x + threadIdx.x;
-  const long long int numTasks=qureg.numAmpsPerChunk;
+  const long long int numTasks = chunkSize;
 
   if (thisTask>=numTasks) return;
 
@@ -1145,7 +1165,10 @@ __global__ void statevec_compactUnitaryDistributedKernel (
   int threadsPerCUDABlock, CUDABlocks;
   threadsPerCUDABlock = 128;
   CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);
-  statevec_compactUnitaryDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg,rot1,rot2,
+  statevec_compactUnitaryDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
+    qureg.numAmpsPerChunk,
+    rot1,
+    rot2,
     stateVecUp, //upper
     stateVecLo, //lower
     stateVecOut); //output
@@ -1231,7 +1254,8 @@ void statevec_unitary(Qureg qureg, const int targetQubit, ComplexMatrix2 u)
 }
 
 __global__ void statevec_controlledCompactUnitaryDistributedKernel (
-  Qureg qureg, const int controlQubit,
+  const long long int chunkSize,
+  const int controlQubit,
   Complex rot1, Complex rot2,
   ComplexArray deviceStateVecUp,
   ComplexArray deviceStateVecLo,
@@ -1239,11 +1263,11 @@ __global__ void statevec_controlledCompactUnitaryDistributedKernel (
 ){
   qreal   stateRealUp,stateRealLo,stateImagUp,stateImagLo;
   long long int thisTask = blockIdx.x*blockDim.x + threadIdx.x;
-  const long long int numTasks=qureg.numAmpsPerChunk;
+  const long long int numTasks = chunkSize;
 
   if (thisTask>=numTasks) return;
 
-  const long long int chunkSize=qureg.numAmpsPerChunk;
+  // const long long int chunkSize=qureg.numAmpsPerChunk;
   const long long int chunkId=qureg.chunkId;
 
   qreal rot1Real=rot1.real, rot1Imag=rot1.imag;
@@ -1290,7 +1314,7 @@ __global__ void statevec_controlledCompactUnitaryDistributedKernel (
   threadsPerCUDABlock = 128;
   CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);
   statevec_controlledCompactUnitaryDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
-    qureg, 
+    qureg.numAmpsPerChunk, 
     controlQubit, 
     rot1,
     rot2, 
@@ -1426,14 +1450,14 @@ void statevec_multiControlledUnitary(Qureg qureg, long long int ctrlQubitsMask, 
 }
 
 __global__ void statevec_pauliXDistributedKernel(
-  Qureg qureg,
+  const long long int chunkSize,
   ComplexArray deviceStateVecIn,
   ComplexArray deviceStateVecOut
 ){
   // stage 1 done! need to optimize!
 
   long long int thisTask = blockIdx.x*blockDim.x + threadIdx.x;
-  const long long int numTasks=qureg.numAmpsPerChunk;
+  const long long int numTasks = chunkSize;
 
   if (thisTask>=numTasks) return;
 
@@ -1464,7 +1488,7 @@ void statevec_pauliXDistributed (Qureg qureg,
   int threadsPerCUDABlock, CUDABlocks;
   threadsPerCUDABlock = 128;
   CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);
-  statevec_pauliXDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg, stateVecIn, stateVecOut);
+  statevec_pauliXDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg.numAmpsPerChunk, stateVecIn, stateVecOut);
 }
 
 void statevec_pauliX(Qureg qureg, const int targetQubit)
@@ -1501,18 +1525,19 @@ void statevec_pauliX(Qureg qureg, const int targetQubit)
 
 
 __global__ void statevec_controlledNotDistributedKernel (
-  Qureg qureg,
+  const long long int chunkSize, 
+  const long long int chunkId,
   const int controlQubit,
   ComplexArray deviceStateVecIn,
   ComplexArray deviceStateVecOut
 ){
   long long int thisTask = blockIdx.x*blockDim.x + threadIdx.x;
-  const long long int numTasks=qureg.numAmpsPerChunk;
+  const long long int numTasks = chunkSize;
 
   if (thisTask>=numTasks) return;
 
-  const long long int chunkSize=qureg.numAmpsPerChunk;
-  const long long int chunkId=qureg.chunkId;
+  // const long long int chunkSize=qureg.numAmpsPerChunk;
+  // const long long int chunkId=qureg.chunkId;
   
   int controlBit;
   
@@ -1544,7 +1569,13 @@ __global__ void statevec_controlledNotDistributedKernel (
   int threadsPerCUDABlock, CUDABlocks;
   threadsPerCUDABlock = 128;
   CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);
-  statevec_controlledNotDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg, controlQubit, stateVecIn, stateVecOut);  
+  statevec_controlledNotDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
+    qureg.numAmpsPerChunk, 
+    qureg.chunkId, 
+    controlQubit, 
+    stateVecIn, 
+    stateVecOut
+  );  
 } 
 
 
@@ -1582,13 +1613,13 @@ void statevec_controlledNot(Qureg qureg, const int controlQubit, const int targe
 }
 
 __global__ void statevec_pauliYDistributedKernel(
-  Qureg qureg,
+  const long long int chunkSize,
   ComplexArray deviceStateVecIn,
   ComplexArray deviceStateVecOut,
   int updateUpper, const int conjFac
 ){
   long long int thisTask = blockIdx.x*blockDim.x + threadIdx.x;;
-  const long long int numTasks=qureg.numAmpsPerChunk;
+  const long long int numTasks = chunkSize;
 
   if (thisTask>=numTasks) return;
 
@@ -1626,7 +1657,7 @@ void statevec_pauliYDistributed(Qureg qureg,
   threadsPerCUDABlock = 128;
   CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);
   statevec_pauliYDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
-    qureg, 
+    qureg.numAmpsPerChunk, 
     stateVecIn, 
     stateVecOut, 
     updateUpper, 
@@ -1695,19 +1726,20 @@ void statevec_pauliYConj(Qureg qureg, const int targetQubit)
 }
 
 __global__ void statevec_controlledPauliYDistributedKernel (
-  Qureg qureg, 
+  const long long int chunkSize, 
+  const long long int chunkId,
   const int controlQubit,
   ComplexArray deviceStateVecIn,
   ComplexArray deviceStateVecOut, 
   const int conjFac
 ){
   long long int thisTask = blockIdx.x*blockDim.x + threadIdx.x; 
-  const long long int numTasks=qureg.numAmpsPerChunk;
+  const long long int numTasks = chunkSize;
 
   if (thisTask>=numTasks) return;
 
-  const long long int chunkSize=qureg.numAmpsPerChunk;
-  const long long int chunkId=qureg.chunkId;
+  // const long long int chunkSize=qureg.numAmpsPerChunk;
+  // const long long int chunkId=qureg.chunkId;
   
   qreal *stateVecRealIn=deviceStateVecIn.real, *stateVecImagIn=deviceStateVecIn.imag;
   qreal *stateVecRealOut=deviceStateVecOut.real, *stateVecImagOut=deviceStateVecOut.imag;
@@ -1728,7 +1760,8 @@ void statevec_controlledPauliYDistributed (Qureg qureg, const int controlQubit,
   threadsPerCUDABlock = 128;
   CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);
   statevec_controlledPauliYDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
-    qureg, 
+    qureg.numAmpsPerChunk, 
+    qureg.chunkId,
     controlQubit,
     stateVecIn, 
     stateVecOut,
@@ -1815,7 +1848,7 @@ void statevec_controlledPauliYConj(Qureg qureg, const int controlQubit, const in
 }
 
 __global__ void statevec_hadamardDistributedKernel(
-  Qureg qureg,
+  const long long int chunkSize,
   ComplexArray deviceStateVecUp,
   ComplexArray deviceStateVecLo,
   ComplexArray deviceStateVecOut,
@@ -1823,7 +1856,7 @@ __global__ void statevec_hadamardDistributedKernel(
 ){
   qreal   stateRealUp,stateRealLo,stateImagUp,stateImagLo;
   long long int thisTask = blockIdx.x*blockDim.x + threadIdx.x;
-  const long long int numTasks=qureg.numAmpsPerChunk;
+  const long long int numTasks = chunkSize;
 
   if (thisTask>=numTasks) return;
 
@@ -1868,10 +1901,12 @@ __global__ void statevec_hadamardDistributedKernel(
   int threadsPerCUDABlock, CUDABlocks;
   threadsPerCUDABlock = 128;
   CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);
-  statevec_hadamardDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg,
+  statevec_hadamardDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
+    qureg.numAmpsPerChunk,
     stateVecUp, //upper
     stateVecLo, //lower
-    stateVecOut, updateUpper); //output
+    stateVecOut, updateUpper //output
+  );
 }
 
 void statevec_hadamard(Qureg qureg, const int targetQubit)
@@ -2174,24 +2209,34 @@ void statevec_swapQubitAmps(Qureg qureg, int qb1, int qb2) {
 
 
 
+
+// Modified from  QuEST_gpu_local.cu (QuEST_gpu.cu)
+
 void statevec_createQureg(Qureg *qureg, int numQubits, QuESTEnv env)
 {   
-    // phase 1 done!
+    // stage 1 done! not very sure.
 
-    // allocate CPU memory
+    // ~~allocate CPU memory~~
     // this part is same with cpu local +yh
 
     long long int numAmps = 1L << numQubits;
     long long int numAmpsPerRank = numAmps/env.numRanks;
     // fix pointers problems from origin QuEST-kit repo. yh 2021.3.28
-    qureg->stateVec.real = (qreal*) malloc(numAmpsPerRank * sizeof(*(qureg->stateVec.real)));
-    qureg->stateVec.imag = (qreal*) malloc(numAmpsPerRank * sizeof(*(qureg->stateVec.imag)));
-    if (env.numRanks>1){
-        qureg->pairStateVec.real = (qreal*) malloc(numAmpsPerRank * sizeof(*(qureg->pairStateVec.real)));
-        qureg->pairStateVec.imag = (qreal*) malloc(numAmpsPerRank * sizeof(*(qureg->pairStateVec.imag)));
+    // qureg->stateVec.real = (qreal*) malloc(numAmpsPerRank * sizeof(*(qureg->stateVec.real)));
+    // qureg->stateVec.imag = (qreal*) malloc(numAmpsPerRank * sizeof(*(qureg->stateVec.imag)));
+    // if (env.numRanks>1){
+    //     qureg->pairStateVec.real = (qreal*) malloc(numAmpsPerRank * sizeof(*(qureg->pairStateVec.real)));
+    //     qureg->pairStateVec.imag = (qreal*) malloc(numAmpsPerRank * sizeof(*(qureg->pairStateVec.imag)));
+    // }
+
+    cudaMalloc(&(qureg->stateVec.real), numAmpsPerRank * sizeof(*(qureg->stateVec.real));
+    cudaMalloc(&(qureg->stateVec.imag), numAmpsPerRank * sizeof(*(qureg->stateVec.imag));
+    if (env.numRanks > 1) {
+      cudaMalloc(&(qureg->stateVec.real), numAmpsPerRank * sizeof(*(qureg->pairStateVec.real)));
+      cudaMalloc(&(qureg->stateVec.imag), numAmpsPerRank * sizeof(*(qureg->pairStateVec.imag));
     }
 
-    // check cpu memory allocation was successful
+    // check gpu memory allocation was successful
     if ( (!(qureg->stateVec.real) || !(qureg->stateVec.imag))
             && numAmpsPerRank ) {
         printf("Could not allocate memory!\n");
@@ -2211,34 +2256,38 @@ void statevec_createQureg(Qureg *qureg, int numQubits, QuESTEnv env)
     qureg->isDensityMatrix = 0;
 
     // allocate GPU memory
-    cudaMalloc(&(qureg->deviceStateVec.real), qureg->numAmpsPerChunk*sizeof(*(qureg->deviceStateVec.real)));
-    cudaMalloc(&(qureg->deviceStateVec.imag), qureg->numAmpsPerChunk*sizeof(*(qureg->deviceStateVec.imag)));
-    cudaMalloc(&(qureg->firstLevelReduction), ceil(qureg->numAmpsPerChunk/(qreal)REDUCE_SHARED_SIZE)*sizeof(qreal));
-    cudaMalloc(&(qureg->secondLevelReduction), ceil(qureg->numAmpsPerChunk/(qreal)(REDUCE_SHARED_SIZE*REDUCE_SHARED_SIZE))*
+    // cudaMalloc(&(qureg->deviceStateVec.real), qureg->numAmpsPerChunk*sizeof(*(qureg->deviceStateVec.real)));
+    // cudaMalloc(&(qureg->deviceStateVec.imag), qureg->numAmpsPerChunk*sizeof(*(qureg->deviceStateVec.imag)));
+    cudaMalloc(&(qureg->firstLevelReduction), ceil(numAmpsPerRank/(qreal)REDUCE_SHARED_SIZE)*sizeof(qreal));
+    cudaMalloc(&(qureg->secondLevelReduction), ceil(numAmpsPerRank/(qreal)(REDUCE_SHARED_SIZE*REDUCE_SHARED_SIZE))*
             sizeof(qreal));
 
     // check gpu memory allocation was successful
-    if (!(qureg->deviceStateVec.real) || !(qureg->deviceStateVec.imag)){
-        printf("Could not allocate memory on GPU!\n");
-        exit (EXIT_FAILURE);
-    }
+    // if (!(qureg->deviceStateVec.real) || !(qureg->deviceStateVec.imag)){
+    //     printf("Could not allocate memory on GPU!\n");
+    //     exit (EXIT_FAILURE);
+    // }
 
 }
 
 void statevec_destroyQureg(Qureg qureg, QuESTEnv env)
 {
-    // phase 1 done!
+    // stage 1 done!
     // add extra reset from cpu local.
     qureg.numQubitsInStateVec = 0;
     qureg.numAmpsTotal = 0;
     qureg.numAmpsPerChunk = 0;
 
     // Free CPU memory
-    free(qureg.stateVec.real);
-    free(qureg.stateVec.imag);
+    // free(qureg.stateVec.real);
+    // free(qureg.stateVec.imag);
+    cudaFree(qureg.stateVec.real);
+    cudaFree(qureg.stateVec.imag);
     if (env.numRanks>1){
-        free(qureg.pairStateVec.real);
-        free(qureg.pairStateVec.imag);
+        // free(qureg.pairStateVec.real);
+        // free(qureg.pairStateVec.imag);
+        cudaFree(qureg.pairStateVec.real);
+        cudaFree(qureg.pairStateVec.imag);
     }
     qureg.stateVec.real = NULL;
     qureg.stateVec.imag = NULL;
@@ -2246,8 +2295,150 @@ void statevec_destroyQureg(Qureg qureg, QuESTEnv env)
     qureg.pairStateVec.imag = NULL;
 
     // Free GPU memory
-    cudaFree(qureg.deviceStateVec.real);
-    cudaFree(qureg.deviceStateVec.imag);
+    // cudaFree(qureg.deviceStateVec.real);
+    // cudaFree(qureg.deviceStateVec.imag);
+    // ? cudaFree(qureg.firstLevelReduction.real);
+}
+
+__global__ void statevec_initBlankStateKernel(long long int stateVecSize, qreal *stateVecReal, qreal *stateVecImag){
+  long long int index;
+
+  // initialise the statevector to be all-zeros
+  index = blockIdx.x*blockDim.x + threadIdx.x;
+  if (index>=stateVecSize) return;
+  stateVecReal[index] = 0.0;
+  stateVecImag[index] = 0.0;
+}
+
+void statevec_initBlankState(Qureg qureg)
+{
+  // stage 1 done!
+
+  int threadsPerCUDABlock, CUDABlocks;
+  threadsPerCUDABlock = 128;
+  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
+  statevec_initBlankStateKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
+      qureg.numAmpsPerChunk, 
+      qureg.stateVec.real, 
+      qureg.stateVec.imag);
+}
+
+// especially for qureg.chunkId == 0
+__global__ void statevec_initZeroStateKernel(long long int stateVecSize, qreal *stateVecReal, qreal *stateVecImag){
+  long long int index;
+
+  // initialise the state to |0000..0000>
+  index = blockIdx.x*blockDim.x + threadIdx.x;
+  if (index>=stateVecSize) return;
+  stateVecReal[index] = 0.0;
+  stateVecImag[index] = 0.0;
+
+  if (index==0){
+      // zero state |0000..0000> has probability 1
+      stateVecReal[0] = 1.0;
+      stateVecImag[0] = 0.0;
+  }
+}
+
+void statevec_initZeroState(Qureg qureg)
+{
+  // stage 1 done!
+  
+  if (qureg.chunkId==0) {
+
+    int threadsPerCUDABlock, CUDABlocks;
+    threadsPerCUDABlock = 128;
+    CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
+
+    // zero state |0000..0000> has probability 1
+    statevec_initZeroStateKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
+      qureg.numAmpsPerChunk, 
+      qureg.stateVec.real, 
+      qureg.stateVec.imag
+    );
+  } else {
+
+    statevec_initBlankState(qureg);
+  }
+
+}
+
+
+void statevec_setAmps(Qureg qureg, long long int startInd, qreal* reals, qreal* imags, long long int numAmps) {
+  // stage 1 done!
+  
+  /* this is actually distributed, since the user's code runs on every node */
+
+  // local start/end indices of the given amplitudes, assuming they fit in this chunk
+  // these may be negative or above qureg.numAmpsPerChunk
+  long long int localStartInd = startInd - qureg.chunkId*qureg.numAmpsPerChunk;
+  long long int localEndInd = localStartInd + numAmps; // exclusive
+
+  // add this to a local index to get corresponding elem in reals & imags
+  long long int offset = qureg.chunkId*qureg.numAmpsPerChunk - startInd;
+
+  // restrict these indices to fit into this chunk
+  if (localStartInd < 0)
+      localStartInd = 0;
+  if (localEndInd > qureg.numAmpsPerChunk)
+      localEndInd = qureg.numAmpsPerChunk;
+  // they may now be out of order = no iterations
+
+  // unpacking OpenMP vars
+  long long int index;
+  qreal* vecRe = qureg.stateVec.real;
+  qreal* vecIm = qureg.stateVec.imag;
+
+  // iterate these local inds - this might involve no iterations
+  if (localStartInd < localEndInd) {
+      size_t copyCount = (size_t)((localEndInd - localStartInd) * sizeof(*(qureg.stateVec.real)));
+      cudaDeviceSynchronize();
+      cudaMemcpy(
+          vecRe + localStartInd,
+          reals + localStartInd + offset,
+          copyCount,
+          cudaMemcpyHostToDevice);
+      cudaMemcpy(
+          vecIm + localStartInd,
+          imags + localStartInd + offset,
+          copyCount,
+          cudaMemcpyHostToDevice);
+  }
+  // for (index=localStartInd; index < localEndInd; index++) {
+  //     vecRe[index] = reals[index + offset];
+  //     vecIm[index] = imags[index + offset];
+  // }
+
+  // Old single GPU version:
+  // cudaDeviceSynchronize();
+  // cudaMemcpy(
+  //     qureg.deviceStateVec.real + startInd, 
+  //     reals,
+  //     numAmps * sizeof(*(qureg.deviceStateVec.real)), 
+  //     cudaMemcpyHostToDevice);
+  // cudaMemcpy(
+  //     qureg.deviceStateVec.imag + startInd,
+  //     imags,
+  //     numAmps * sizeof(*(qureg.deviceStateVec.real)), 
+  //     cudaMemcpyHostToDevice);
+}
+
+/** works for both statevectors and density matrices */
+void statevec_cloneQureg(Qureg targetQureg, Qureg copyQureg) {
+  // stage 1 done!
+  
+  // copy copyQureg's GPU statevec to targetQureg's GPU statevec
+  cudaDeviceSynchronize();
+  cudaMemcpy(
+      targetQureg.stateVec.real, 
+      copyQureg.stateVec.real, 
+      targetQureg.numAmpsPerChunk*sizeof(*(targetQureg.stateVec.real)), 
+      cudaMemcpyDeviceToDevice);
+  cudaMemcpy(
+      targetQureg.stateVec.imag, 
+      copyQureg.stateVec.imag, 
+      targetQureg.numAmpsPerChunk*sizeof(*(targetQureg.stateVec.imag)), 
+      cudaMemcpyDeviceToDevice);
 }
 
 

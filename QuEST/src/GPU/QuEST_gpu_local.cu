@@ -150,38 +150,6 @@ extern "C" {
 #endif
 
 
-void statevec_setAmps(Qureg qureg, long long int startInd, qreal* reals, qreal* imags, long long int numAmps) {
-    
-    cudaDeviceSynchronize();
-    cudaMemcpy(
-        qureg.deviceStateVec.real + startInd, 
-        reals,
-        numAmps * sizeof(*(qureg.deviceStateVec.real)), 
-        cudaMemcpyHostToDevice);
-    cudaMemcpy(
-        qureg.deviceStateVec.imag + startInd,
-        imags,
-        numAmps * sizeof(*(qureg.deviceStateVec.real)), 
-        cudaMemcpyHostToDevice);
-}
-
-
-/** works for both statevectors and density matrices */
-void statevec_cloneQureg(Qureg targetQureg, Qureg copyQureg) {
-    
-    // copy copyQureg's GPU statevec to targetQureg's GPU statevec
-    cudaDeviceSynchronize();
-    cudaMemcpy(
-        targetQureg.deviceStateVec.real, 
-        copyQureg.deviceStateVec.real, 
-        targetQureg.numAmpsPerChunk*sizeof(*(targetQureg.deviceStateVec.real)), 
-        cudaMemcpyDeviceToDevice);
-    cudaMemcpy(
-        targetQureg.deviceStateVec.imag, 
-        copyQureg.deviceStateVec.imag, 
-        targetQureg.numAmpsPerChunk*sizeof(*(targetQureg.deviceStateVec.imag)), 
-        cudaMemcpyDeviceToDevice);
-}
 
 __global__ void densmatr_initPureStateKernel(
     long long int numPureAmps,
@@ -274,146 +242,6 @@ void densmatr_initClassicalState(Qureg qureg, long long int stateInd)
         qureg.deviceStateVec.imag, densityInd);
 }
 
-void statevec_createQureg(Qureg *qureg, int numQubits, QuESTEnv env)
-{   
-    // phase 1 done!
-
-    // allocate CPU memory
-    // this part is same with cpu local +yh
-
-    long long int numAmps = 1L << numQubits;
-    long long int numAmpsPerRank = numAmps/env.numRanks;
-    // fix pointers problems from origin QuEST-kit repo. yh 2021.3.28
-    qureg->stateVec.real = (qreal*) malloc(numAmpsPerRank * sizeof(*(qureg->stateVec.real)));
-    qureg->stateVec.imag = (qreal*) malloc(numAmpsPerRank * sizeof(*(qureg->stateVec.imag)));
-    if (env.numRanks>1){
-        qureg->pairStateVec.real = (qreal*) malloc(numAmpsPerRank * sizeof(*(qureg->pairStateVec.real)));
-        qureg->pairStateVec.imag = (qreal*) malloc(numAmpsPerRank * sizeof(*(qureg->pairStateVec.imag)));
-    }
-
-    // check cpu memory allocation was successful
-    if ( (!(qureg->stateVec.real) || !(qureg->stateVec.imag))
-            && numAmpsPerRank ) {
-        printf("Could not allocate memory!\n");
-        exit (EXIT_FAILURE);
-    }
-    if ( env.numRanks>1 && (!(qureg->pairStateVec.real) || !(qureg->pairStateVec.imag))
-            && numAmpsPerRank ) {
-        printf("Could not allocate memory!\n");
-        exit (EXIT_FAILURE);
-    }
-
-    qureg->numQubitsInStateVec = numQubits;
-    qureg->numAmpsPerChunk = numAmpsPerRank;
-    qureg->numAmpsTotal = numAmps;
-    qureg->chunkId = env.rank;
-    qureg->numChunks = env.numRanks;
-    qureg->isDensityMatrix = 0;
-
-    // allocate GPU memory
-    cudaMalloc(&(qureg->deviceStateVec.real), qureg->numAmpsPerChunk*sizeof(*(qureg->deviceStateVec.real)));
-    cudaMalloc(&(qureg->deviceStateVec.imag), qureg->numAmpsPerChunk*sizeof(*(qureg->deviceStateVec.imag)));
-    cudaMalloc(&(qureg->firstLevelReduction), ceil(qureg->numAmpsPerChunk/(qreal)REDUCE_SHARED_SIZE)*sizeof(qreal));
-    cudaMalloc(&(qureg->secondLevelReduction), ceil(qureg->numAmpsPerChunk/(qreal)(REDUCE_SHARED_SIZE*REDUCE_SHARED_SIZE))*
-            sizeof(qreal));
-
-    // check gpu memory allocation was successful
-    if (!(qureg->deviceStateVec.real) || !(qureg->deviceStateVec.imag)){
-        printf("Could not allocate memory on GPU!\n");
-        exit (EXIT_FAILURE);
-    }
-
-}
-
-void statevec_destroyQureg(Qureg qureg, QuESTEnv env)
-{
-    // phase 1 done!
-    // add extra reset from cpu local.
-    qureg.numQubitsInStateVec = 0;
-    qureg.numAmpsTotal = 0;
-    qureg.numAmpsPerChunk = 0;
-
-    // Free CPU memory
-    free(qureg.stateVec.real);
-    free(qureg.stateVec.imag);
-    if (env.numRanks>1){
-        free(qureg.pairStateVec.real);
-        free(qureg.pairStateVec.imag);
-    }
-    qureg.stateVec.real = NULL;
-    qureg.stateVec.imag = NULL;
-    qureg.pairStateVec.real = NULL;
-    qureg.pairStateVec.imag = NULL;
-
-    // Free GPU memory
-    cudaFree(qureg.deviceStateVec.real);
-    cudaFree(qureg.deviceStateVec.imag);
-}
-
-int GPUExists(void){
-    // phase 1 done!
-    // there is nothing to do, maybe change it to CUDA API directly.
-    int deviceCount, device;
-    int gpuDeviceCount = 0;
-    struct cudaDeviceProp properties;
-    cudaError_t cudaResultCode = cudaGetDeviceCount(&deviceCount);
-    if (cudaResultCode != cudaSuccess) deviceCount = 0;
-    /* machines with no GPUs can still report one emulation device */
-    for (device = 0; device < deviceCount; ++device) {
-        cudaGetDeviceProperties(&properties, device);
-        if (properties.major != 9999) { /* 9999 means emulation only */
-            ++gpuDeviceCount;
-        }
-    }
-    if (gpuDeviceCount) return 1;
-    else return 0;
-}
-
-QuESTEnv createQuESTEnvLocal(void) {
-    // phase 1 done!
-    // this function is not used by distributed gpu method
-    // init MPI environment
-    if (!GPUExists()){
-        printf("Trying to run GPU code with no GPU available\n");
-        exit(EXIT_FAILURE);
-    }
-    
-    QuESTEnv env;
-    env.rank=0;
-    env.numRanks=1;
-    
-    seedQuESTDefaultLocal();
-    
-    return env;
-}
-
-void syncQuESTEnvLocal(QuESTEnv env){
-    // phase 1 done!
-    // this function is not used by distributed gpu method
-    cudaDeviceSynchronize();
-} 
-
-int syncQuESTSuccessLocal(int successCode){
-    // phase 1 done!
-    // this function is not used by distributed gpu method
-    return successCode;
-}
-
-void destroyQuESTEnvLocal(QuESTEnv env){
-    // MPI finalize goes here in MPI version. Call this function anyway for consistency
-}
-
-void reportQuESTEnvLocal(QuESTEnv env){
-    printf("EXECUTION ENVIRONMENT:\n");
-    printf("Running locally on one node with GPU\n");
-    printf("Number of ranks is %d\n", env.numRanks);
-# ifdef _OPENMP
-    printf("OpenMP enabled\n");
-    printf("Number of threads available is %d\n", omp_get_max_threads());
-# else
-    printf("OpenMP disabled\n");
-# endif
-}
 
 void getEnvironmentString(QuESTEnv env, Qureg qureg, char str[200]){
     sprintf(str, "%dqubits_GPU_noMpi_noOMP", qureg.numQubitsInStateVec);    
@@ -421,6 +249,9 @@ void getEnvironmentString(QuESTEnv env, Qureg qureg, char str[200]){
 
 void copyStateToGPU(Qureg qureg)
 {
+    assert( 0 );
+    // don't call this function, the content has been injected into certain code.
+
     if (DEBUG) printf("Copying data to GPU\n");
     cudaMemcpy(qureg.deviceStateVec.real, qureg.stateVec.real, 
             qureg.numAmpsPerChunk*sizeof(*(qureg.deviceStateVec.real)), cudaMemcpyHostToDevice);
@@ -431,6 +262,9 @@ void copyStateToGPU(Qureg qureg)
 
 void copyStateFromGPU(Qureg qureg)
 {
+    assert( 0 );
+    // don't call this function, the content has been injected into certain code.
+
     cudaDeviceSynchronize();
     if (DEBUG) printf("Copying data from GPU\n");
     cudaMemcpy(qureg.stateVec.real, qureg.deviceStateVec.real, 
@@ -483,56 +317,6 @@ qreal statevec_getImagAmpLocal(Qureg qureg, long long int index){
     cudaMemcpy(&el, &(qureg.deviceStateVec.imag[index]), 
             sizeof(*(qureg.deviceStateVec.imag)), cudaMemcpyDeviceToHost);
     return el;
-}
-
-__global__ void statevec_initBlankStateKernel(long long int stateVecSize, qreal *stateVecReal, qreal *stateVecImag){
-    long long int index;
-
-    // initialise the statevector to be all-zeros
-    index = blockIdx.x*blockDim.x + threadIdx.x;
-    if (index>=stateVecSize) return;
-    stateVecReal[index] = 0.0;
-    stateVecImag[index] = 0.0;
-}
-
-void statevec_initBlankState(Qureg qureg)
-{
-    int threadsPerCUDABlock, CUDABlocks;
-    threadsPerCUDABlock = 128;
-    CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
-    statevec_initBlankStateKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
-        qureg.numAmpsPerChunk, 
-        qureg.deviceStateVec.real, 
-        qureg.deviceStateVec.imag);
-}
-
-__global__ void statevec_initZeroStateKernel(long long int stateVecSize, qreal *stateVecReal, qreal *stateVecImag){
-    long long int index;
-
-    // initialise the state to |0000..0000>
-    index = blockIdx.x*blockDim.x + threadIdx.x;
-    if (index>=stateVecSize) return;
-    stateVecReal[index] = 0.0;
-    stateVecImag[index] = 0.0;
-
-    if (index==0){
-        // zero state |0000..0000> has probability 1
-        stateVecReal[0] = 1.0;
-        stateVecImag[0] = 0.0;
-    }
-}
-
-void statevec_initZeroState(Qureg qureg)
-{
-    // stage 1 done!
-    // is fine for distributed gpu
-    int threadsPerCUDABlock, CUDABlocks;
-    threadsPerCUDABlock = 128;
-    CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
-    statevec_initZeroStateKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
-        qureg.numAmpsPerChunk, 
-        qureg.deviceStateVec.real, 
-        qureg.deviceStateVec.imag);
 }
 
 __global__ void statevec_initPlusStateKernel(long long int stateVecSize, qreal *stateVecReal, qreal *stateVecImag){
@@ -644,33 +428,39 @@ int statevec_initStateFromSingleFile(Qureg *qureg, char filename[200], QuESTEnv 
     FILE *fp;
     char line[200];
 
-    fp = fopen(filename, "r");
-    if (fp == NULL)
-        return 0;
-    
-    indexInChunk = 0; totalIndex = 0;
-    while (fgets(line, sizeof(char)*200, fp) != NULL && totalIndex<stateVecSize){
-        if (line[0]!='#'){
-            int chunkId = totalIndex/chunkSize;
-            if (chunkId==qureg->chunkId){
-                # if QuEST_PREC==1
-                    sscanf(line, "%f, %f", &(stateVecReal[indexInChunk]),
-                            &(stateVecImag[indexInChunk]));
-                # elif QuEST_PREC==2
-                    sscanf(line, "%lf, %lf", &(stateVecReal[indexInChunk]),
-                            &(stateVecImag[indexInChunk]));
-                # elif QuEST_PREC==4
-                    sscanf(line, "%lf, %lf", &(stateVecReal[indexInChunk]),
-                            &(stateVecImag[indexInChunk]));
-                # endif
-                indexInChunk += 1;
+    for (int rank=0; rank<(qureg->numChunks); rank++){
+        if (rank==qureg->chunkId){
+            fp = fopen(filename, "r");
+
+            // indicate file open failure
+            if (fp == NULL)
+                return 0;
+
+            indexInChunk = 0; totalIndex = 0;
+            while (fgets(line, sizeof(char)*200, fp) != NULL && totalIndex<stateVecSize){
+                if (line[0]!='#'){
+                    int chunkId = (int) (totalIndex/chunkSize);
+                    if (chunkId==qureg->chunkId){
+                        # if QuEST_PREC==1
+                        sscanf(line, "%f, %f", &(stateVecReal[indexInChunk]),
+                                &(stateVecImag[indexInChunk]));
+                        # elif QuEST_PREC==2
+                        sscanf(line, "%lf, %lf", &(stateVecReal[indexInChunk]),
+                                &(stateVecImag[indexInChunk]));
+                        # elif QuEST_PREC==4
+                        sscanf(line, "%Lf, %Lf", &(stateVecReal[indexInChunk]),
+                                &(stateVecImag[indexInChunk]));
+                        # endif
+                        indexInChunk += 1;
+                    }
+                    totalIndex += 1;
+                }
             }
-            totalIndex += 1;
+            fclose(fp);
         }
+        syncQuESTEnv(env);
     }
-    fclose(fp);
-    copyStateToGPU(*qureg);
-    
+
     // indicate success
     return 1;
 }
