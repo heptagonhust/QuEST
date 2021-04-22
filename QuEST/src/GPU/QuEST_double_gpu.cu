@@ -1,6 +1,7 @@
 #include "QuEST_gpu_local.cu"
 #include "QuEST_gpu.h"
-#include "cuMPI_runtime.h"
+#include "cuMPI/cuMPI_runtime.h"
+#include "cuMPI/src/cuMPI_runtime.h"
 
 /********************** For cuMPI environment **********************/
 int myRank;                 // cuMPI comm local ranks
@@ -133,7 +134,8 @@ int getChunkIdFromIndex(Qureg qureg, long long int index){
 }
 
 QuESTEnv createQuESTEnv(void) {
-  // phase 1 done!
+  // stage 1 done! changed to cuMPI.
+  
   // Local version is similar to cpu_local version. +yh
 
   if (!GPUExists()){
@@ -144,25 +146,26 @@ QuESTEnv createQuESTEnv(void) {
   QuESTEnv env;
 
   // init MPI environment
-  int rank, numRanks, initialized;
+  // int rank, numRanks, initialized;
+  int initialized;
   cuMPI_Initialized(&initialized);
   if (!initialized){
 
     cuMPI_Init(NULL, NULL);
-    cuMPI_Comm_size(MPI_COMM_WORLD, &numRanks);
-    cuMPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    // cuMPI_Comm_size(MPI_COMM_WORLD, &numRanks);
+    // cuMPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-    env.rank=rank;
-    env.numRanks=numRanks;
-    mpi4cudaAllocateOneGPUPerProcess();
+    env.rank=myRank;
+    env.numRanks=nRanks;
+    // cuAllocateOneGPUPerProcess();
 
   } else {
 
     printf("ERROR: Trying to initialize QuESTEnv multiple times. Ignoring...\n");
 
     // ensure env is initialised anyway, so the compiler is happy
-    MPI_Comm_size(MPI_COMM_WORLD, &numRanks);
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    // MPI_Comm_size(MPI_COMM_WORLD, &numRanks);
+    // MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     env.rank=rank;
     env.numRanks=numRanks;
 
@@ -174,44 +177,35 @@ QuESTEnv createQuESTEnv(void) {
 }
 
 void syncQuESTEnv(QuESTEnv env){
-  // phase 1 done!
+  // stage 1 done!
   // After computation in GPU device is done, synchronize MPI message. 
   cudaDeviceSynchronize();
-  MPI_Barrier(MPI_COMM_WORLD);
+  cuMPI_Barrier(cuMPI_COMM_WORLD);
 }
 
 int syncQuESTSuccess(int successCode){
-  // phase 1 done!
+  // stage 1 done!
   // nothing to do for GPU method.
   int totalSuccess;
-  MPI_Allreduce(&successCode, &totalSuccess, 1, MPI_INT, MPI_LAND, MPI_COMM_WORLD);
+  // MPI_LAND logic and
+  cuMPI_Allreduce(&successCode, &totalSuccess, 1, cuMPI_INT, cuMPI_MIN, cuMPI_COMM_WORLD);
   return totalSuccess;
 }
 
 void destroyQuESTEnv(QuESTEnv env){
-  // phase 1 done!
-  // need to finalize nccl jobs.
+  // stage 1 done!
+  // ~~need to finalize nccl jobs~~
 
-  mpi4cudaFinalizeNCCL();
-
-  int finalized;
-  MPI_Finalized(&finalized);
-  if (!finalized) MPI_Finalize();
-  else printf("ERROR: Trying to close QuESTEnv multiple times. Ignoring\n");
+  cuMPI_Finalize();
 }
 
 void reportQuESTEnv(QuESTEnv env){
-  // phase 1 done!
-  // maybe nothing to do.
+  // stage 1 done!
+  // ~~maybe nothing to do.~~
   printf("EXECUTION ENVIRONMENT:\n");
   printf("Running locally on one node with GPU\n");
   printf("Number of ranks is %d\n", env.numRanks);
-  # ifdef _OPENMP
-  printf("OpenMP enabled\n");
-  printf("Number of threads available is %d\n", omp_get_max_threads());
-  # else
   printf("OpenMP disabled\n");
-  # endif
 }
 
 qreal statevec_getRealAmp(Qureg qureg, long long int index){
@@ -225,7 +219,7 @@ qreal statevec_getRealAmp(Qureg qureg, long long int index){
       cudaMemcpy(&el, &(qureg.deviceStateVec.real[index-chunkId*qureg.numAmpsPerChunk]), 
         sizeof(*(qureg.deviceStateVec.real)), cudaMemcpyDeviceToHost);
   }
-  MPI_Bcast(&el, 1, MPI_QuEST_REAL, chunkId, MPI_COMM_WORLD);
+  cuMPI_Bcast(&el, 1, MPI_QuEST_REAL, chunkId, MPI_COMM_WORLD);
   return el;
 }
 
@@ -240,7 +234,7 @@ qreal statevec_getImagAmp(Qureg qureg, long long int index){
       cudaMemcpy(&el, &(qureg.deviceStateVec.imag[index-chunkId*qureg.numAmpsPerChunk]), 
         sizeof(*(qureg.deviceStateVec.imag)), cudaMemcpyDeviceToHost);
   }
-  MPI_Bcast(&el, 1, MPI_QuEST_REAL, chunkId, MPI_COMM_WORLD);
+  cuMPI_Bcast(&el, 1, MPI_QuEST_REAL, chunkId, MPI_COMM_WORLD);
   return el;
 }
 
@@ -2008,6 +2002,7 @@ void statevec_collapseToKnownProbOutcome(Qureg qureg, const int measureQubit, in
 }
 
 void seedQuESTDefault(){
+  // stage 1 done!
 
   //!!cpu_local is similar to gpu_local
 
@@ -2019,7 +2014,8 @@ void seedQuESTDefault(){
   getQuESTDefaultSeedKey(key);
   // this seed will be used to generate the same random number on all procs,
   // therefore we want to make sure all procs receive the same key
-  MPI_Bcast(key, 2, MPI_UNSIGNED_LONG, 0, MPI_COMM_WORLD);
+  // using cuMPI_UNSIGNED_LONG
+  cuMPI_Bcast(key, 2, cuMPI_UINT32_T, 0, cuMPI_COMM_WORLD);
   init_by_array(key, 2);
 }
 
@@ -2177,6 +2173,86 @@ void statevec_swapQubitAmps(Qureg qureg, int qb1, int qb2) {
 }
 
 
+
+void statevec_createQureg(Qureg *qureg, int numQubits, QuESTEnv env)
+{   
+    // phase 1 done!
+
+    // allocate CPU memory
+    // this part is same with cpu local +yh
+
+    long long int numAmps = 1L << numQubits;
+    long long int numAmpsPerRank = numAmps/env.numRanks;
+    // fix pointers problems from origin QuEST-kit repo. yh 2021.3.28
+    qureg->stateVec.real = (qreal*) malloc(numAmpsPerRank * sizeof(*(qureg->stateVec.real)));
+    qureg->stateVec.imag = (qreal*) malloc(numAmpsPerRank * sizeof(*(qureg->stateVec.imag)));
+    if (env.numRanks>1){
+        qureg->pairStateVec.real = (qreal*) malloc(numAmpsPerRank * sizeof(*(qureg->pairStateVec.real)));
+        qureg->pairStateVec.imag = (qreal*) malloc(numAmpsPerRank * sizeof(*(qureg->pairStateVec.imag)));
+    }
+
+    // check cpu memory allocation was successful
+    if ( (!(qureg->stateVec.real) || !(qureg->stateVec.imag))
+            && numAmpsPerRank ) {
+        printf("Could not allocate memory!\n");
+        exit (EXIT_FAILURE);
+    }
+    if ( env.numRanks>1 && (!(qureg->pairStateVec.real) || !(qureg->pairStateVec.imag))
+            && numAmpsPerRank ) {
+        printf("Could not allocate memory!\n");
+        exit (EXIT_FAILURE);
+    }
+
+    qureg->numQubitsInStateVec = numQubits;
+    qureg->numAmpsPerChunk = numAmpsPerRank;
+    qureg->numAmpsTotal = numAmps;
+    qureg->chunkId = env.rank;
+    qureg->numChunks = env.numRanks;
+    qureg->isDensityMatrix = 0;
+
+    // allocate GPU memory
+    cudaMalloc(&(qureg->deviceStateVec.real), qureg->numAmpsPerChunk*sizeof(*(qureg->deviceStateVec.real)));
+    cudaMalloc(&(qureg->deviceStateVec.imag), qureg->numAmpsPerChunk*sizeof(*(qureg->deviceStateVec.imag)));
+    cudaMalloc(&(qureg->firstLevelReduction), ceil(qureg->numAmpsPerChunk/(qreal)REDUCE_SHARED_SIZE)*sizeof(qreal));
+    cudaMalloc(&(qureg->secondLevelReduction), ceil(qureg->numAmpsPerChunk/(qreal)(REDUCE_SHARED_SIZE*REDUCE_SHARED_SIZE))*
+            sizeof(qreal));
+
+    // check gpu memory allocation was successful
+    if (!(qureg->deviceStateVec.real) || !(qureg->deviceStateVec.imag)){
+        printf("Could not allocate memory on GPU!\n");
+        exit (EXIT_FAILURE);
+    }
+
+}
+
+void statevec_destroyQureg(Qureg qureg, QuESTEnv env)
+{
+    // phase 1 done!
+    // add extra reset from cpu local.
+    qureg.numQubitsInStateVec = 0;
+    qureg.numAmpsTotal = 0;
+    qureg.numAmpsPerChunk = 0;
+
+    // Free CPU memory
+    free(qureg.stateVec.real);
+    free(qureg.stateVec.imag);
+    if (env.numRanks>1){
+        free(qureg.pairStateVec.real);
+        free(qureg.pairStateVec.imag);
+    }
+    qureg.stateVec.real = NULL;
+    qureg.stateVec.imag = NULL;
+    qureg.pairStateVec.real = NULL;
+    qureg.pairStateVec.imag = NULL;
+
+    // Free GPU memory
+    cudaFree(qureg.deviceStateVec.real);
+    cudaFree(qureg.deviceStateVec.imag);
+}
+
+
 //densmatr_mixDephasing(qureg, targetQubit, depolLevel);
 //densmatr_oneQubitDegradeOffDiagonal(qureg, targetQubit, dephase);
 //densmatr_mixTwoQubitDephasing(qureg, qubit1, qubit2, depolLevel);
+
+
