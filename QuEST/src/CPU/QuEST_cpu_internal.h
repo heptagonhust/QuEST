@@ -100,6 +100,7 @@ void statevec_compactUnitaryLocalSmall (Qureg qureg, const int targetQubit, Comp
 
 void statevec_compactUnitaryLocalSIMD (Qureg qureg, const int targetQubit, Complex alpha, Complex beta);
 
+void statevec_compactUnitaryLocalSIMDAVX512 (Qureg qureg, const int targetQubit, Complex alpha, Complex beta);
 void statevec_compactUnitaryDistributed (Qureg qureg,
         Complex rot1, Complex rot2,
         ComplexArray stateVecUp,

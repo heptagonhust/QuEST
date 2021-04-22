@@ -20,6 +20,7 @@ set(RANDOM_OUTPUT_EXE   "demo"  CACHE STRING "Executable to compile to")
 set(QFT_OUTPUT_EXE "qft" CACHE STRING "qft executable")
 
 add_compile_options(-mavx)
+add_compile_options(-mavx512f)
 add_compile_options(-mfma)
 add_compile_options(-flto)
 add_compile_options(-mvzeroupper)
