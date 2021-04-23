@@ -42,45 +42,6 @@ Complex statevec_calcInnerProduct(Qureg bra, Qureg ket) {
   return globalInnerProd;
 }
 
-qreal densmatr_calcTotalProb(Qureg qureg) {
-  // phase 1 done! (mode 2)
-  // gpu local is almost same with cpu local
-
-	// computes the trace by summing every element ("diag") with global index (2^n + 1)i for i in [0, 2^n-1]
-
-	// computes first local index containing a diagonal element
-	long long int diagSpacing = 1LL + (1LL << qureg.numQubitsRepresented);
-
-  copyStateFromCurrentGPU(qureg);
-
-  long long int numPrevDiags = (qureg.chunkId>0)? 1+(qureg.chunkId*qureg.numAmpsPerChunk)/diagSpacing : 0;
-  long long int globalIndNextDiag = diagSpacing * numPrevDiags;
-  long long int localIndNextDiag = globalIndNextDiag % qureg.numAmpsPerChunk;
-  long long int index;
-
-  qreal rankTotal = 0;
-  qreal y, t, c;
-  c = 0;
-
-  // iterates every local diagonal
-  for (index=localIndNextDiag; index < qureg.numAmpsPerChunk; index += diagSpacing) {
-
-    // Kahan summation - brackets are important
-    y = qureg.stateVec.real[index] - c;
-    t = rankTotal + y;
-    c = ( t - rankTotal ) - y;
-    rankTotal = t;
-  }
-
-  // combine each node's sum of diagonals
-  qreal globalTotal;
-  if (qureg.numChunks > 1)
-    MPI_Allreduce(&rankTotal, &globalTotal, 1, MPI_QuEST_REAL, MPI_SUM, MPI_COMM_WORLD);
-  else
-    globalTotal = rankTotal;
-
-  return globalTotal;
-}
 
 qreal statevec_calcTotalProbLocal(Qureg qureg){
   // phase 1 done! (mode 2)
@@ -413,141 +374,6 @@ static int densityMatrixBlockFitsInChunk(long long int chunkSize, int numQubits,
     else return 0;
 }
 
-/** This copies/clones vec (a statevector) into every node's matr pairState.
- * (where matr is a density matrix or equal number of qubits as vec) */
-void copyVecIntoMatrixPairState(Qureg matr, Qureg vec) {
-
-    // Remember that for every amplitude that `vec` stores on the node,
-    // `matr` stores an entire column. Ergo there are always an integer
-    // number (in fact, a power of 2) number of  `matr`s columns on each node.
-    // Since the total size of `vec` (between all nodes) is one column
-    // and each node stores (possibly) multiple columns (vec.numAmpsPerChunk as many),
-    // `vec` can be fit entirely inside a single node's matr.pairStateVec (with excess!)
-
-    // copy this node's vec segment into this node's matr pairState (in the right spot)
-    long long int numLocalAmps = vec.numAmpsPerChunk;
-    long long int myOffset = vec.chunkId * numLocalAmps;
-    memcpy(&matr.pairStateVec.real[myOffset], vec.stateVec.real, numLocalAmps * sizeof(qreal));
-    memcpy(&matr.pairStateVec.imag[myOffset], vec.stateVec.imag, numLocalAmps * sizeof(qreal));
-
-    // we now want to share this node's vec segment with other node, so that
-    // vec is cloned in every node's matr.pairStateVec
-
-    // work out how many messages needed to send vec chunks (2GB limit)
-    long long int maxMsgSize = MPI_MAX_AMPS_IN_MSG;
-    if (numLocalAmps < maxMsgSize)
-        maxMsgSize = numLocalAmps;
-    // safely assume MPI_MAX... = 2^n, so division always exact:
-    int numMsgs = numLocalAmps / maxMsgSize;
-
-    // every node gets a turn at being the broadcaster
-    for (int broadcaster=0; broadcaster < vec.numChunks; broadcaster++) {
-
-        long long int otherOffset = broadcaster * numLocalAmps;
-
-        // every node sends a slice of qureg's pairState to every other
-        for (int i=0; i< numMsgs; i++) {
-
-            // by sending that slice in further slices (due to bandwidth limit)
-            MPI_Bcast(
-                &matr.pairStateVec.real[otherOffset + i*maxMsgSize],
-                maxMsgSize,  MPI_QuEST_REAL, broadcaster, MPI_COMM_WORLD);
-            MPI_Bcast(
-                &matr.pairStateVec.imag[otherOffset + i*maxMsgSize],
-                maxMsgSize,  MPI_QuEST_REAL, broadcaster, MPI_COMM_WORLD);
-        }
-    }
-}
-
-/********************************************/
-
-qreal densmatr_calcFidelity(Qureg qureg, Qureg pureState) {
-  // phase 1 undone!!!!!!!!
-  // concern about cpu_local version +yh
-  // !!copyVecIntoMatrixPairState
-
-  // set qureg's pairState is to be the full pureState (on every node)
-  // this function call is same with cpu local like below: +yh
-  // 1. save pointers to qureg's pair state
-  // 2. populate qureg pair state with pure state (by repointing)
-  // 3. restore pointers
-  copyVecIntoMatrixPairState(qureg, pureState);
-
-  // collect calcFidelityLocal by every machine
-  qreal localSum = densmatr_calcFidelityLocal(qureg, pureState);
-
-  // sum each localSum
-  qreal globalSum;
-  MPI_Allreduce(&localSum, &globalSum, 1, MPI_QuEST_REAL, MPI_SUM, MPI_COMM_WORLD);
-
-  return globalSum;
-}
-
-qreal densmatr_calcHilbertSchmidtDistance(Qureg a, Qureg b) {
-  // phase 1 done! (mode1)
-  // gpu local function was modified.
-  qreal localSum = densmatr_calcHilbertSchmidtDistanceSquaredLocal(a, b);
-
-  qreal globalSum;
-  MPI_Allreduce(&localSum, &globalSum, 1, MPI_QuEST_REAL, MPI_SUM, MPI_COMM_WORLD);
-
-  qreal dist = sqrt(globalSum);
-  return dist;
-}
-
-qreal densmatr_calcInnerProduct(Qureg a, Qureg b) {
-  // phase 1 done! (mode1)
-  // cpu local wrapper function just return local call.
-  qreal localSum = densmatr_calcInnerProductLocal(a, b);
-
-  qreal globalSum;
-  MPI_Allreduce(&localSum, &globalSum, 1, MPI_QuEST_REAL, MPI_SUM, MPI_COMM_WORLD);
-
-  qreal dist = globalSum;
-  return dist;
-}
-
-void densmatr_initPureState(Qureg targetQureg, Qureg copyQureg) {
-  // phase 1 undone!!!!!!!!
-  // similar to densmatr_calcFidelity.
-  // concern about cpu_local version +yh
-  // !!copyVecIntoMatrixPairState
-
-  if (targetQureg.numChunks==1){
-      // local version
-      // save pointers to qureg's pair state
-      qreal* quregPairRePtr = targetQureg.pairStateVec.real;
-      qreal* quregPairImPtr = targetQureg.pairStateVec.imag;
-
-      // populate qureg pair state with pure state (by repointing)
-      targetQureg.pairStateVec.real = copyQureg.stateVec.real;
-      targetQureg.pairStateVec.imag = copyQureg.stateVec.imag;
-
-      // populate density matrix via it's pairState
-      densmatr_initPureStateLocal(targetQureg, copyQureg);
-
-      // restore pointers
-      targetQureg.pairStateVec.real = quregPairRePtr;
-      targetQureg.pairStateVec.imag = quregPairImPtr;
-  } else {
-      // set qureg's pairState is to be the full pure state (on every node)
-      copyVecIntoMatrixPairState(targetQureg, copyQureg);
-
-      // update every density matrix chunk using pairState
-      densmatr_initPureStateLocal(targetQureg, copyQureg);
-  }
-}
-
-
-
-
-
-
-/************** copy from distributed cpu version **************/
-
-
-
-
 
 
 void exchangeStateVectors(Qureg qureg, int pairRank){
@@ -681,437 +507,6 @@ void compressPairVectorForSingleQubitDepolarise(Qureg qureg, const int targetQub
   }
 }
 
-void compressPairVectorForTwoQubitDepolarise(Qureg qureg, const int targetQubit,
-      const int qubit2) {
-
-  long long int sizeInnerBlockQ1, sizeInnerHalfBlockQ1;
-  long long int sizeInnerBlockQ2, sizeInnerHalfBlockQ2, sizeInnerQuarterBlockQ2;
-  long long int sizeOuterColumn, sizeOuterQuarterColumn;
-  long long int
-       thisInnerBlockQ2,
-       thisOuterColumn, // current column in density matrix
-       thisIndex,    // current index in (density matrix representation) state vector
-       thisIndexInOuterColumn,
-       thisIndexInInnerBlockQ1,
-       thisIndexInInnerBlockQ2,
-       thisInnerBlockQ1InInnerBlockQ2;
-  int outerBitQ1, outerBitQ2;
-
-  long long int thisTask;
-  const long long int numTasks=qureg.numAmpsPerChunk>>2;
-
-  // set dimensions
-  sizeInnerHalfBlockQ1 = 1LL << targetQubit;
-  sizeInnerHalfBlockQ2 = 1LL << qubit2;
-  sizeInnerQuarterBlockQ2 = sizeInnerHalfBlockQ2 >> 1;
-  sizeInnerBlockQ2 = sizeInnerHalfBlockQ2 << 1;
-  sizeInnerBlockQ1 = 2LL * sizeInnerHalfBlockQ1;
-  sizeOuterColumn = 1LL << qureg.numQubitsRepresented;
-  sizeOuterQuarterColumn = sizeOuterColumn >> 2;
-
-# ifdef _OPENMP
-# pragma omp parallel \
-  shared   (sizeInnerBlockQ1,sizeInnerHalfBlockQ1,sizeInnerQuarterBlockQ2,sizeInnerHalfBlockQ2,sizeInnerBlockQ2, \
-              sizeOuterColumn, \
-              sizeOuterQuarterColumn,qureg) \
-  private  (thisTask,thisInnerBlockQ2,thisOuterColumn,thisIndex,thisIndexInOuterColumn, \
-              thisIndexInInnerBlockQ1,thisIndexInInnerBlockQ2,thisInnerBlockQ1InInnerBlockQ2,outerBitQ1,outerBitQ2)
-# endif
-  {
-# ifdef _OPENMP
-# pragma omp for schedule (static)
-# endif
-      // thisTask iterates over half the elements in this process' chunk of the density matrix
-      // treat this as iterating over all columns, then iterating over half the values
-      // within one column.
-      // If this function has been called, this process' chunk contains half an
-      // outer block or less
-      for (thisTask=0; thisTask<numTasks; thisTask++) {
-          // we want to process all columns in the density matrix,
-          // updating the values for half of each column (one half of each inner block)
-          thisOuterColumn = thisTask / sizeOuterQuarterColumn;
-          // thisTask % sizeOuterQuarterColumn
-          thisIndexInOuterColumn = thisTask&(sizeOuterQuarterColumn-1);
-          thisInnerBlockQ2 = thisIndexInOuterColumn / sizeInnerQuarterBlockQ2;
-          // thisTask % sizeInnerQuarterBlockQ2;
-          thisIndexInInnerBlockQ2 = thisTask&(sizeInnerQuarterBlockQ2-1);
-          thisInnerBlockQ1InInnerBlockQ2 = thisIndexInInnerBlockQ2 / sizeInnerHalfBlockQ1;
-          // thisTask % sizeInnerHalfBlockQ1;
-          thisIndexInInnerBlockQ1 = thisTask&(sizeInnerHalfBlockQ1-1);
-
-          // get index in state vector corresponding to upper inner block
-          thisIndex = thisOuterColumn*sizeOuterColumn + thisInnerBlockQ2*sizeInnerBlockQ2
-              + thisInnerBlockQ1InInnerBlockQ2*sizeInnerBlockQ1 + thisIndexInInnerBlockQ1;
-
-          // check if we are in the upper or lower half of an outer block for Q1
-          outerBitQ1 = extractBitOnCPU(targetQubit, (thisIndex+qureg.numAmpsPerChunk*qureg.chunkId)>>qureg.numQubitsRepresented);
-          // if we are in the lower half of an outer block, shift to be in the lower half
-          // of the inner block as well (we want to dephase |0><0| and |1><1| only)
-          thisIndex += outerBitQ1*(sizeInnerHalfBlockQ1);
-
-          // check if we are in the upper or lower half of an outer block for Q2
-          outerBitQ2 = extractBitOnCPU(qubit2, (thisIndex+qureg.numAmpsPerChunk*qureg.chunkId)>>qureg.numQubitsRepresented);
-          // if we are in the lower half of an outer block, shift to be in the lower half
-          // of the inner block as well (we want to dephase |0><0| and |1><1| only)
-          thisIndex += outerBitQ2*(sizeInnerQuarterBlockQ2<<1);
-
-          // NOTE: at this point thisIndex should be the index of the element we want to
-          // dephase in the chunk of the state vector on this process, in the
-          // density matrix representation.
-          // thisTask is the index of the pair element in pairStateVec
-
-          // state[thisIndex] = (1-depolLevel)*state[thisIndex] + depolLevel*(state[thisIndex]
-          //      + pair[thisTask])/2
-          qureg.pairStateVec.real[thisTask+numTasks*2] = qureg.stateVec.real[thisIndex];
-          qureg.pairStateVec.imag[thisTask+numTasks*2] = qureg.stateVec.imag[thisIndex];
-      }
-  }
-}
-
-
-
-
-
-
-/***************** copy from QuEST_cpu.c *****************/
-
-
-
-
-
-
-
-void densmatr_mixDepolarisingDistributed(Qureg qureg, const int targetQubit, qreal depolLevel) {
-
-  // first do dephase part.
-  // TODO -- this might be more efficient to do at the same time as the depolarise if we move to
-  // iterating over all elements in the state vector for the purpose of vectorisation
-  // TODO -- if we keep this split, move this function to densmatr_mixDepolarising()
-  densmatr_mixDephasing(qureg, targetQubit, depolLevel);
-
-  long long int sizeInnerBlock, sizeInnerHalfBlock;
-  long long int sizeOuterColumn, sizeOuterHalfColumn;
-  long long int thisInnerBlock, // current block
-       thisOuterColumn, // current column in density matrix
-       thisIndex,    // current index in (density matrix representation) state vector
-       thisIndexInOuterColumn,
-       thisIndexInInnerBlock;
-  int outerBit;
-
-  long long int thisTask;
-  const long long int numTasks=qureg.numAmpsPerChunk>>1;
-
-  // set dimensions
-  sizeInnerHalfBlock = 1LL << targetQubit;
-  sizeInnerBlock = 2LL * sizeInnerHalfBlock;
-  sizeOuterColumn = 1LL << qureg.numQubitsRepresented;
-  sizeOuterHalfColumn = sizeOuterColumn >> 1;
-
-# ifdef _OPENMP
-# pragma omp parallel \
-  shared   (sizeInnerBlock,sizeInnerHalfBlock,sizeOuterColumn,sizeOuterHalfColumn,qureg,depolLevel) \
-  private  (thisTask,thisInnerBlock,thisOuterColumn,thisIndex,thisIndexInOuterColumn, \
-              thisIndexInInnerBlock,outerBit)
-# endif
-  {
-# ifdef _OPENMP
-# pragma omp for schedule (static)
-# endif
-      // thisTask iterates over half the elements in this process' chunk of the density matrix
-      // treat this as iterating over all columns, then iterating over half the values
-      // within one column.
-      // If this function has been called, this process' chunk contains half an
-      // outer block or less
-      for (thisTask=0; thisTask<numTasks; thisTask++) {
-          // we want to process all columns in the density matrix,
-          // updating the values for half of each column (one half of each inner block)
-          thisOuterColumn = thisTask / sizeOuterHalfColumn;
-          thisIndexInOuterColumn = thisTask&(sizeOuterHalfColumn-1); // thisTask % sizeOuterHalfColumn
-          thisInnerBlock = thisIndexInOuterColumn/sizeInnerHalfBlock;
-          // get index in state vector corresponding to upper inner block
-          thisIndexInInnerBlock = thisTask&(sizeInnerHalfBlock-1); // thisTask % sizeInnerHalfBlock
-          thisIndex = thisOuterColumn*sizeOuterColumn + thisInnerBlock*sizeInnerBlock
-              + thisIndexInInnerBlock;
-          // check if we are in the upper or lower half of an outer block
-          outerBit = extractBitOnCPU(targetQubit, (thisIndex+qureg.numAmpsPerChunk*qureg.chunkId)>>qureg.numQubitsRepresented);
-          // if we are in the lower half of an outer block, shift to be in the lower half
-          // of the inner block as well (we want to dephase |0><0| and |1><1| only)
-          thisIndex += outerBit*(sizeInnerHalfBlock);
-
-          // NOTE: at this point thisIndex should be the index of the element we want to
-          // dephase in the chunk of the state vector on this process, in the
-          // density matrix representation.
-          // thisTask is the index of the pair element in pairStateVec
-
-
-          // state[thisIndex] = (1-depolLevel)*state[thisIndex] + depolLevel*(state[thisIndex]
-          //      + pair[thisTask])/2
-          qureg.stateVec.real[thisIndex] = (1-depolLevel)*qureg.stateVec.real[thisIndex] +
-                  depolLevel*(qureg.stateVec.real[thisIndex] + qureg.pairStateVec.real[thisTask])/2;
-
-          qureg.stateVec.imag[thisIndex] = (1-depolLevel)*qureg.stateVec.imag[thisIndex] +
-                  depolLevel*(qureg.stateVec.imag[thisIndex] + qureg.pairStateVec.imag[thisTask])/2;
-      }
-  }
-}
-
-void densmatr_mixDampingDistributed(Qureg qureg, const int targetQubit, qreal damping) {
-  qreal retain=1-damping;
-  qreal dephase=sqrt(1-damping);
-  // first do dephase part.
-  // TODO -- this might be more efficient to do at the same time as the depolarise if we move to
-  // iterating over all elements in the state vector for the purpose of vectorisation
-  // TODO -- if we keep this split, move this function to densmatr_mixDepolarising()
-  densmatr_mixDampingDephase(qureg, targetQubit, dephase);
-
-  long long int sizeInnerBlock, sizeInnerHalfBlock;
-  long long int sizeOuterColumn, sizeOuterHalfColumn;
-  long long int thisInnerBlock, // current block
-       thisOuterColumn, // current column in density matrix
-       thisIndex,    // current index in (density matrix representation) state vector
-       thisIndexInOuterColumn,
-       thisIndexInInnerBlock;
-  int outerBit;
-  int stateBit;
-
-  long long int thisTask;
-  const long long int numTasks=qureg.numAmpsPerChunk>>1;
-
-  // set dimensions
-  sizeInnerHalfBlock = 1LL << targetQubit;
-  sizeInnerBlock = 2LL * sizeInnerHalfBlock;
-  sizeOuterColumn = 1LL << qureg.numQubitsRepresented;
-  sizeOuterHalfColumn = sizeOuterColumn >> 1;
-
-# ifdef _OPENMP
-# pragma omp parallel \
-  shared   (sizeInnerBlock,sizeInnerHalfBlock,sizeOuterColumn,sizeOuterHalfColumn,qureg,damping, retain, dephase) \
-  private  (thisTask,thisInnerBlock,thisOuterColumn,thisIndex,thisIndexInOuterColumn, \
-              thisIndexInInnerBlock,outerBit, stateBit)
-# endif
-  {
-# ifdef _OPENMP
-# pragma omp for schedule (static)
-# endif
-      // thisTask iterates over half the elements in this process' chunk of the density matrix
-      // treat this as iterating over all columns, then iterating over half the values
-      // within one column.
-      // If this function has been called, this process' chunk contains half an
-      // outer block or less
-      for (thisTask=0; thisTask<numTasks; thisTask++) {
-          // we want to process all columns in the density matrix,
-          // updating the values for half of each column (one half of each inner block)
-          thisOuterColumn = thisTask / sizeOuterHalfColumn;
-          thisIndexInOuterColumn = thisTask&(sizeOuterHalfColumn-1); // thisTask % sizeOuterHalfColumn
-          thisInnerBlock = thisIndexInOuterColumn/sizeInnerHalfBlock;
-          // get index in state vector corresponding to upper inner block
-          thisIndexInInnerBlock = thisTask&(sizeInnerHalfBlock-1); // thisTask % sizeInnerHalfBlock
-          thisIndex = thisOuterColumn*sizeOuterColumn + thisInnerBlock*sizeInnerBlock
-              + thisIndexInInnerBlock;
-          // check if we are in the upper or lower half of an outer block
-          outerBit = extractBitOnCPU(targetQubit, (thisIndex+qureg.numAmpsPerChunk*qureg.chunkId)>>qureg.numQubitsRepresented);
-          // if we are in the lower half of an outer block, shift to be in the lower half
-          // of the inner block as well (we want to dephase |0><0| and |1><1| only)
-          thisIndex += outerBit*(sizeInnerHalfBlock);
-
-          // NOTE: at this point thisIndex should be the index of the element we want to
-          // dephase in the chunk of the state vector on this process, in the
-          // density matrix representation.
-          // thisTask is the index of the pair element in pairStateVec
-
-          // Extract state bit, is 0 if thisIndex corresponds to a state with 0 in the target qubit
-          // and is 1 if thisIndex corresponds to a state with 1 in the target qubit
-          stateBit = extractBitOnCPU(targetQubit, (thisIndex+qureg.numAmpsPerChunk*qureg.chunkId));
-
-          // state[thisIndex] = (1-depolLevel)*state[thisIndex] + depolLevel*(state[thisIndex]
-          //      + pair[thisTask])/2
-          if(stateBit == 0){
-              qureg.stateVec.real[thisIndex] = qureg.stateVec.real[thisIndex] +
-                  damping*( qureg.pairStateVec.real[thisTask]);
-
-              qureg.stateVec.imag[thisIndex] = qureg.stateVec.imag[thisIndex] +
-                  damping*( qureg.pairStateVec.imag[thisTask]);
-          } else{
-              qureg.stateVec.real[thisIndex] = retain*qureg.stateVec.real[thisIndex];
-
-              qureg.stateVec.imag[thisIndex] = retain*qureg.stateVec.imag[thisIndex];
-          }
-      }
-  }
-}
-
-
-
-
-
-/***************************************************************/
-
-
-
-
-
-void densmatr_mixDepolarising(Qureg qureg, const int targetQubit, qreal depolLevel) {
-  // !!need compare to distributed cpu version
-  // !!local cpu version is below:
-  // if (depolLevel == 0)
-  //       return;
-
-  //   densmatr_mixDepolarisingLocal(qureg, targetQubit, depolLevel);
-
-  if (depolLevel == 0)
-      return;
-
-  int rankIsUpper; // rank is in the upper half of an outer block
-  int pairRank; // rank of corresponding chunk
-
-  int useLocalDataOnly = densityMatrixBlockFitsInChunk(qureg.numAmpsPerChunk,
-          qureg.numQubitsRepresented, targetQubit);
-
-  if (useLocalDataOnly){
-      densmatr_mixDepolarisingLocal(qureg, targetQubit, depolLevel);
-  } else {
-      // pack data to send to my pair process into the first half of pairStateVec
-      compressPairVectorForSingleQubitDepolarise(qureg, targetQubit);
-
-      rankIsUpper = chunkIsUpperInOuterBlock(qureg.chunkId, qureg.numAmpsPerChunk, targetQubit,
-              qureg.numQubitsRepresented);
-      pairRank = getChunkOuterBlockPairId(rankIsUpper, qureg.chunkId, qureg.numAmpsPerChunk,
-              targetQubit, qureg.numQubitsRepresented);
-
-      exchangePairStateVectorHalves(qureg, pairRank);
-      densmatr_mixDepolarisingDistributed(qureg, targetQubit, depolLevel);
-  }
-
-}
-
-void densmatr_mixDamping(Qureg qureg, const int targetQubit, qreal damping) {
-  // !!need compare to distributed cpu version
-  // !!local cpu version is below:
-  // if (damping == 0)
-  // return;
-  // densmatr_mixDampingLocal(qureg, targetQubit, damping);
-
-  if (damping == 0)
-      return;
-
-  int rankIsUpper; // rank is in the upper half of an outer block
-  int pairRank; // rank of corresponding chunk
-
-  int useLocalDataOnly = densityMatrixBlockFitsInChunk(qureg.numAmpsPerChunk,
-          qureg.numQubitsRepresented, targetQubit);
-
-  if (useLocalDataOnly){
-      densmatr_mixDampingLocal(qureg, targetQubit, damping);
-  } else {
-      // pack data to send to my pair process into the first half of pairStateVec
-      compressPairVectorForSingleQubitDepolarise(qureg, targetQubit);
-
-      rankIsUpper = chunkIsUpperInOuterBlock(qureg.chunkId, qureg.numAmpsPerChunk, targetQubit,
-              qureg.numQubitsRepresented);
-      pairRank = getChunkOuterBlockPairId(rankIsUpper, qureg.chunkId, qureg.numAmpsPerChunk,
-              targetQubit, qureg.numQubitsRepresented);
-
-      exchangePairStateVectorHalves(qureg, pairRank);
-      densmatr_mixDampingDistributed(qureg, targetQubit, damping);
-  }
-
-}
-
-void densmatr_mixTwoQubitDepolarising(Qureg qureg, int qubit1, int qubit2, qreal depolLevel){
-  // !!need compare to distributed cpu version
-  // !!concern about local cpu version
-  
-  if (depolLevel == 0)
-      return;
-  int rankIsUpperBiggerQubit, rankIsUpperSmallerQubit;
-  int pairRank; // rank of corresponding chunk
-  int biggerQubit, smallerQubit;
-
-  densmatr_mixTwoQubitDephasing(qureg, qubit1, qubit2, depolLevel);
-
-  qreal eta = 2/depolLevel;
-  qreal delta = eta - 1 - sqrt( (eta-1)*(eta-1) - 1 );
-  qreal gamma = 1+delta;
-  gamma = 1/(gamma*gamma*gamma);
-  const qreal GAMMA_PARTS_1_OR_2 = 1.0;
-  // TODO -- test delta too small
-  /*
-  if (fabs(4*delta*(1+delta)*gamma-depolLevel)>1e-5){
-      printf("Numerical error in delta; for small error rates try Taylor expansion.\n");
-      exit(1);
-  }
-  */
-
-  biggerQubit = qubit1 > qubit2 ? qubit1 : qubit2;
-  smallerQubit = qubit1 < qubit2 ? qubit1 : qubit2;
-  int useLocalDataOnlyBigQubit, useLocalDataOnlySmallQubit;
-
-  useLocalDataOnlyBigQubit = densityMatrixBlockFitsInChunk(qureg.numAmpsPerChunk,
-      qureg.numQubitsRepresented, biggerQubit);
-  if (useLocalDataOnlyBigQubit){
-      // does parts 1, 2 and 3 locally in one go
-      densmatr_mixTwoQubitDepolarisingLocal(qureg, qubit1, qubit2, delta, gamma);
-  } else {
-      useLocalDataOnlySmallQubit = densityMatrixBlockFitsInChunk(qureg.numAmpsPerChunk,
-          qureg.numQubitsRepresented, smallerQubit);
-      if (useLocalDataOnlySmallQubit){
-          // do part 1 locally
-          densmatr_mixTwoQubitDepolarisingLocalPart1(qureg, smallerQubit, biggerQubit, delta);
-
-          // do parts 2 and 3 distributed (if part 2 is distributed part 3 is also distributed)
-          // part 2 will be distributed and the value of the small qubit won't matter
-          compressPairVectorForTwoQubitDepolarise(qureg, smallerQubit, biggerQubit);
-          rankIsUpperBiggerQubit = chunkIsUpperInOuterBlock(qureg.chunkId, qureg.numAmpsPerChunk, biggerQubit,
-                  qureg.numQubitsRepresented);
-          pairRank = getChunkOuterBlockPairId(rankIsUpperBiggerQubit, qureg.chunkId, qureg.numAmpsPerChunk,
-                  biggerQubit, qureg.numQubitsRepresented);
-
-          exchangePairStateVectorHalves(qureg, pairRank);
-          densmatr_mixTwoQubitDepolarisingDistributed(qureg, smallerQubit, biggerQubit, delta, GAMMA_PARTS_1_OR_2);
-
-          // part 3 will be distributed but involve rearranging for the smaller qubit
-          compressPairVectorForTwoQubitDepolarise(qureg, smallerQubit, biggerQubit);
-          rankIsUpperBiggerQubit = chunkIsUpperInOuterBlock(qureg.chunkId, qureg.numAmpsPerChunk, biggerQubit,
-                  qureg.numQubitsRepresented);
-          pairRank = getChunkOuterBlockPairId(rankIsUpperBiggerQubit, qureg.chunkId, qureg.numAmpsPerChunk,
-                  biggerQubit, qureg.numQubitsRepresented);
-
-          exchangePairStateVectorHalves(qureg, pairRank);
-          densmatr_mixTwoQubitDepolarisingQ1LocalQ2DistributedPart3(qureg, smallerQubit, biggerQubit, delta, gamma);
-      } else {
-          // do part 1, 2 and 3 distributed
-          // part 1
-          compressPairVectorForTwoQubitDepolarise(qureg, smallerQubit, biggerQubit);
-          rankIsUpperSmallerQubit = chunkIsUpperInOuterBlock(qureg.chunkId, qureg.numAmpsPerChunk, smallerQubit,
-                  qureg.numQubitsRepresented);
-          pairRank = getChunkOuterBlockPairId(rankIsUpperSmallerQubit, qureg.chunkId, qureg.numAmpsPerChunk,
-                  smallerQubit, qureg.numQubitsRepresented);
-
-          exchangePairStateVectorHalves(qureg, pairRank);
-          densmatr_mixTwoQubitDepolarisingDistributed(qureg, smallerQubit, biggerQubit, delta, GAMMA_PARTS_1_OR_2);
-
-          // part 2
-          compressPairVectorForTwoQubitDepolarise(qureg, smallerQubit, biggerQubit);
-          rankIsUpperBiggerQubit = chunkIsUpperInOuterBlock(qureg.chunkId, qureg.numAmpsPerChunk, biggerQubit,
-                  qureg.numQubitsRepresented);
-          pairRank = getChunkOuterBlockPairId(rankIsUpperBiggerQubit, qureg.chunkId, qureg.numAmpsPerChunk,
-                  biggerQubit, qureg.numQubitsRepresented);
-
-          exchangePairStateVectorHalves(qureg, pairRank);
-          densmatr_mixTwoQubitDepolarisingDistributed(qureg, smallerQubit, biggerQubit, delta, GAMMA_PARTS_1_OR_2);
-
-          // part 3
-          compressPairVectorForTwoQubitDepolarise(qureg, smallerQubit, biggerQubit);
-          pairRank = getChunkOuterBlockPairIdForPart3(rankIsUpperSmallerQubit, rankIsUpperBiggerQubit,
-                  qureg.chunkId, qureg.numAmpsPerChunk, smallerQubit, biggerQubit, qureg.numQubitsRepresented);
-          exchangePairStateVectorHalves(qureg, pairRank);
-          densmatr_mixTwoQubitDepolarisingDistributed(qureg, smallerQubit, biggerQubit, delta, gamma);
-
-      }
-  }
-
-}
-
 __global__ void statevec_compactUnitaryDistributedKernel (
   const long long int chunkSize,
   Complex rot1, Complex rot2,
@@ -1163,7 +558,7 @@ __global__ void statevec_compactUnitaryDistributedKernel (
   assert(isReadyOnGPU(qureg));
   int threadsPerCUDABlock, CUDABlocks;
   threadsPerCUDABlock = 128;
-  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);
+  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
   statevec_compactUnitaryDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
     qureg.numAmpsPerChunk,
     rot1,
@@ -1311,7 +706,7 @@ __global__ void statevec_controlledCompactUnitaryDistributedKernel (
   assert(isReadyOnGPU(qureg));
   int threadsPerCUDABlock, CUDABlocks;
   threadsPerCUDABlock = 128;
-  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);
+  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
   statevec_controlledCompactUnitaryDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
     qureg.numAmpsPerChunk, 
     controlQubit, 
@@ -1486,7 +881,7 @@ void statevec_pauliXDistributed (Qureg qureg,
   assert(isReadyOnGPU(qureg));
   int threadsPerCUDABlock, CUDABlocks;
   threadsPerCUDABlock = 128;
-  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);
+  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
   statevec_pauliXDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg.numAmpsPerChunk, stateVecIn, stateVecOut);
 }
 
@@ -1567,7 +962,7 @@ __global__ void statevec_controlledNotDistributedKernel (
   assert(isReadyOnGPU(qureg));
   int threadsPerCUDABlock, CUDABlocks;
   threadsPerCUDABlock = 128;
-  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);
+  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
   statevec_controlledNotDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
     qureg.numAmpsPerChunk, 
     qureg.chunkId, 
@@ -1654,7 +1049,7 @@ void statevec_pauliYDistributed(Qureg qureg,
   assert(isReadyOnGPU(qureg));
   int threadsPerCUDABlock, CUDABlocks;
   threadsPerCUDABlock = 128;
-  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);
+  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
   statevec_pauliYDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
     qureg.numAmpsPerChunk, 
     stateVecIn, 
@@ -1757,7 +1152,7 @@ void statevec_controlledPauliYDistributed (Qureg qureg, const int controlQubit,
   assert(isReadyOnGPU(qureg));
   int threadsPerCUDABlock, CUDABlocks;
   threadsPerCUDABlock = 128;
-  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);
+  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
   statevec_controlledPauliYDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
     qureg.numAmpsPerChunk, 
     qureg.chunkId,
@@ -1899,7 +1294,7 @@ __global__ void statevec_hadamardDistributedKernel(
   assert(isReadyOnGPU(qureg));
   int threadsPerCUDABlock, CUDABlocks;
   threadsPerCUDABlock = 128;
-  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);
+  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
   statevec_hadamardDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
     qureg.numAmpsPerChunk,
     stateVecUp, //upper
@@ -1946,8 +1341,46 @@ void statevec_hadamard(Qureg qureg, const int targetQubit)
   }
 }
 
+__global__ void statevec_findProbabilityOfZeroDistributed (
+  const long long int chunkSize,
+  qreal *stateVecReal,
+  qreal *stateVecImag,
+  qreal *totalProbability // ----- measured probability
+) {
+  // ----- temp variables
+  long long int thisTask = blockIdx.x*blockDim.x + threadIdx.x; // task based approach for expose loop with small granularity
+  const long long int numTasks = chunkSize;
+  if (thisTask>=numTasks) return;
 
+  // ---------------------------------------------------------------- //
+  //            find probability                                      //
+  // ---------------------------------------------------------------- //
 
+  atomicAdd(totalProbability, stateVecReal[thisTask]*stateVecReal[thisTask]
+          + stateVecImag[thisTask]*stateVecImag[thisTask]);
+}
+
+/** Measure the probability of a specified qubit being in the zero state across all amplitudes held in this chunk.
+ * Size of regions to skip is a multiple of chunkSize.
+ * The results are communicated and aggregated by the caller
+ *  
+ *  @param[in] qureg object representing the set of qubits
+ *  @return probability of qubit measureQubit being zero
+ */
+ qreal statevec_findProbabilityOfZeroDistributed (Qureg qureg) {
+  // stage 1 done!
+  qreal totalProbability = 0.0;
+  int threadsPerCUDABlock, CUDABlocks;
+  threadsPerCUDABlock = 128;
+  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
+  statevec_findProbabilityOfZeroDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
+    qureg.numAmpsPerChunk,
+    qureg.stateVec.real,
+    qureg.stateVec.imag,
+    &totalProbability
+  );
+  return totalProbability;
+}
 
 
 /** Find chunks to skip when calculating probability of qubit being zero.
@@ -1971,7 +1404,8 @@ void statevec_hadamard(Qureg qureg, const int targetQubit)
 
 qreal statevec_calcProbOfOutcome(Qureg qureg, const int measureQubit, int outcome)
 {
-  //!!need to compare to gpu_local & cpu_local
+  // stage 1 done! optimize statevec_findProbabilityOfZeroDistributed!
+  //~~!!need to compare to gpu_local & cpu_local~~
 
   qreal stateProb=0, totalStateProb=0;
   int skipValuesWithinRank = halfMatrixBlockFitsInChunk(qureg.numAmpsPerChunk, measureQubit);
@@ -1982,35 +1416,9 @@ qreal statevec_calcProbOfOutcome(Qureg qureg, const int measureQubit, int outcom
       stateProb = statevec_findProbabilityOfZeroDistributed(qureg);
     } else stateProb = 0;
   }
-  MPI_Allreduce(&stateProb, &totalStateProb, 1, MPI_QuEST_REAL, MPI_SUM, MPI_COMM_WORLD);
+  cuMPI_Allreduce(&stateProb, &totalStateProb, 1, cuMPI_QuEST_REAL, cuMPI_SUM, cuMPI_COMM_WORLD);
   if (outcome==1) totalStateProb = 1.0 - totalStateProb;
   return totalStateProb;
-}
-
-qreal densmatr_calcProbOfOutcome(Qureg qureg, const int measureQubit, int outcome) {
-
-  //!!need to compare to gpu_local & cpu_local
-
-	qreal zeroProb = densmatr_findProbabilityOfZeroLocal(qureg, measureQubit);
-
-	qreal outcomeProb;
-	MPI_Allreduce(&zeroProb, &outcomeProb, 1, MPI_QuEST_REAL, MPI_SUM, MPI_COMM_WORLD);
-	if (outcome == 1)
-		outcomeProb = 1.0 - outcomeProb;
-
-	return outcomeProb;
-}
-
-qreal densmatr_calcPurity(Qureg qureg) {
-
-  //!!simple return in cpu_local
-
-  qreal localPurity = densmatr_calcPurityLocal(qureg);
-
-  qreal globalPurity;
-  MPI_Allreduce(&localPurity, &globalPurity, 1, MPI_QuEST_REAL, MPI_SUM, MPI_COMM_WORLD);
-
-  return globalPurity;
 }
 
 void statevec_collapseToKnownProbOutcome(Qureg qureg, const int measureQubit, int outcome, qreal totalStateProb)
@@ -2053,10 +1461,6 @@ void seedQuESTDefault(){
   init_by_array(key, 2);
 }
 
-
-
-
-
 /** returns -1 if this node contains no amplitudes where qb1 and qb2
  * have opposite parity, otherwise returns the global index of one
  * of such contained amplitudes (not necessarily the first)
@@ -2079,13 +1483,6 @@ void seedQuESTDefault(){
 
   return -1;
 }
-
-
-
-
-
-
-
 
 void statevec_swapQubitAmps(Qureg qureg, int qb1, int qb2) {
 
@@ -2585,9 +1982,90 @@ qreal statevec_getImagAmp(Qureg qureg, long long int index){
   return el; 
 }
 
+__global__ void statevec_initPlusStateKernel(
+  long long int chunkSize, 
+  qreal *stateVecReal, 
+  qreal *stateVecImag, 
+  qreal normFactor
+){
+  long long int index;
 
-//densmatr_mixDephasing(qureg, targetQubit, depolLevel);
-//densmatr_oneQubitDegradeOffDiagonal(qureg, targetQubit, dephase);
-//densmatr_mixTwoQubitDephasing(qureg, qubit1, qubit2, depolLevel);
+  index = blockIdx.x*blockDim.x + threadIdx.x;
+  if (index>=chunkSize) return;
 
+  // qreal normFactor = 1.0/sqrt((qreal)stateVecSize);
+  stateVecReal[index] = normFactor;
+  stateVecImag[index] = 0.0;
+}
 
+void statevec_initPlusState(Qureg qureg)
+{
+  // stage 1 done!
+  
+  long long int chunkSize, stateVecSize;
+  long long int index;
+
+  // dimension of the state vector
+  chunkSize = qureg.numAmpsPerChunk;
+  stateVecSize = chunkSize*qureg.numChunks;
+  qreal normFactor = 1.0/sqrt((qreal)stateVecSize);
+
+  // initialise the state to |+++..+++> = 1/normFactor {1, 1, 1, ...}
+  int threadsPerCUDABlock, CUDABlocks;
+  threadsPerCUDABlock = 128;
+  CUDABlocks = ceil((qreal)(chunkSize)/threadsPerCUDABlock);
+  statevec_initPlusStateKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
+      chunkSize, 
+      qureg.stateVec.real, 
+      qureg.stateVec.imag, 
+      normFactor);
+}
+
+__global__ void statevec_initClassicalStateKernel(
+  long long int stateVecSize, 
+  qreal *stateVecReal, 
+  qreal *stateVecImag, 
+  long long int stateInd,
+){
+  long long int index;
+
+  // initialise the state to |stateInd>
+  index = blockIdx.x*blockDim.x + threadIdx.x;
+  if (index>=stateVecSize) return;
+  stateVecReal[index] = 0.0;
+  stateVecImag[index] = 0.0;
+
+  if (index==stateInd){
+      // classical state has probability 1
+      stateVecReal[stateInd] = 1.0;
+      stateVecImag[stateInd] = 0.0;
+  }
+}
+
+void statevec_initClassicalState(Qureg qureg, long long int stateInd)
+{
+  // stage 1 done!
+  int threadsPerCUDABlock, CUDABlocks;
+  threadsPerCUDABlock = 128;
+  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
+
+  // dimension of the state vector
+  long long int stateVecSize = qureg.numAmpsPerChunk;
+
+  // give the specified classical state prob 1
+  if (qureg.chunkId == stateInd/stateVecSize){
+      statevec_initClassicalStateKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
+          stateVecSize, 
+          qureg.stateVec.real, 
+          qureg.stateVec.imag,
+          stateInd % stateVecSize, 
+      );
+  } else {
+      statevec_initClassicalStateKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
+          stateVecSize, 
+          qureg.stateVec.real, 
+          qureg.stateVec.imag,
+          stateVecSize, // chunkId not match, so index==stateInd(=stateVecSize) will always be 0
+      );
+  }
+}

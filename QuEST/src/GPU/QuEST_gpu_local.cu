@@ -24,72 +24,6 @@ qreal statevec_getImagAmpLocal(Qureg qureg, long long int index){
     return el;
 }
 
-__global__ void statevec_initPlusStateKernel(long long int stateVecSize, qreal *stateVecReal, qreal *stateVecImag){
-    long long int index;
-
-    index = blockIdx.x*blockDim.x + threadIdx.x;
-    if (index>=stateVecSize) return;
-
-    qreal normFactor = 1.0/sqrt((qreal)stateVecSize);
-    stateVecReal[index] = normFactor;
-    stateVecImag[index] = 0.0;
-}
-
-void statevec_initPlusState(Qureg qureg)
-{
-    long long int chunkSize, stateVecSize;
-    long long int index;
-
-    // dimension of the state vector
-    chunkSize = qureg.numAmpsPerChunk;
-    stateVecSize = chunkSize*qureg.numChunks;
-    qreal normFactor = 1.0/sqrt((qreal)stateVecSize);
-
-    // Can't use qureg->stateVec as a private OMP var
-    qreal *stateVecReal = qureg.stateVec.real;
-    qreal *stateVecImag = qureg.stateVec.imag;
-
-    // initialise the state to |+++..+++> = 1/normFactor {1, 1, 1, ...}
-    for (index=0; index<chunkSize; index++) {
-        stateVecReal[index] = normFactor;
-        stateVecImag[index] = 0.0;
-    }
-
-    int threadsPerCUDABlock, CUDABlocks;
-    threadsPerCUDABlock = 128;
-    CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
-    statevec_initPlusStateKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
-        qureg.numAmpsPerChunk, 
-        qureg.stateVec.real, 
-        qureg.stateVec.imag);
-}
-
-__global__ void statevec_initClassicalStateKernel(long long int stateVecSize, qreal *stateVecReal, qreal *stateVecImag, long long int stateInd){
-    long long int index;
-
-    // initialise the state to |stateInd>
-    index = blockIdx.x*blockDim.x + threadIdx.x;
-    if (index>=stateVecSize) return;
-    stateVecReal[index] = 0.0;
-    stateVecImag[index] = 0.0;
-
-    if (index==stateInd){
-        // classical state has probability 1
-        stateVecReal[stateInd] = 1.0;
-        stateVecImag[stateInd] = 0.0;
-    }
-}
-void statevec_initClassicalState(Qureg qureg, long long int stateInd)
-{
-    int threadsPerCUDABlock, CUDABlocks;
-    threadsPerCUDABlock = 128;
-    CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
-    statevec_initClassicalStateKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
-        qureg.numAmpsPerChunk, 
-        qureg.deviceStateVec.real, 
-        qureg.deviceStateVec.imag, stateInd);
-}
-
 __global__ void statevec_initDebugStateKernel(long long int stateVecSize, qreal *stateVecReal, qreal *stateVecImag){
     long long int index;
 
@@ -107,8 +41,8 @@ void statevec_initDebugState(Qureg qureg)
     CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
     statevec_initDebugStateKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
         qureg.numAmpsPerChunk,
-        qureg.deviceStateVec.real, 
-        qureg.deviceStateVec.imag);
+        qureg.stateVec.real, 
+        qureg.stateVec.imag);
 }
 
 __global__ void statevec_initStateOfSingleQubitKernel(long long int stateVecSize, qreal *stateVecReal, qreal *stateVecImag, int qubitId, int outcome){
@@ -134,7 +68,7 @@ void statevec_initStateOfSingleQubit(Qureg *qureg, int qubitId, int outcome)
     int threadsPerCUDABlock, CUDABlocks;
     threadsPerCUDABlock = 128;
     CUDABlocks = ceil((qreal)(qureg->numAmpsPerChunk)/threadsPerCUDABlock);
-    statevec_initStateOfSingleQubitKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg->numAmpsPerChunk, qureg->deviceStateVec.real, qureg->deviceStateVec.imag, qubitId, outcome);
+    statevec_initStateOfSingleQubitKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg->numAmpsPerChunk, qureg->stateVec.real, qureg->stateVec.imag, qubitId, outcome);
 }
 
 int statevec_compareStates(Qureg mq1, Qureg mq2, qreal precision){
@@ -178,8 +112,8 @@ __global__ void statevec_compactUnitaryKernel (Qureg qureg, const int rotQubit, 
     // ---------------------------------------------------------------- //
 
     //! fix -- no necessary for GPU version
-    qreal *stateVecReal = qureg.deviceStateVec.real;
-    qreal *stateVecImag = qureg.deviceStateVec.imag;
+    qreal *stateVecReal = qureg.stateVec.real;
+    qreal *stateVecImag = qureg.stateVec.imag;
     qreal alphaImag=alpha.imag, alphaReal=alpha.real;
     qreal betaImag=beta.imag, betaReal=beta.real;
 
@@ -242,8 +176,8 @@ __global__ void statevec_controlledCompactUnitaryKernel (Qureg qureg, const int 
     // ---------------------------------------------------------------- //
 
     //! fix -- no necessary for GPU version
-    qreal *stateVecReal = qureg.deviceStateVec.real;
-    qreal *stateVecImag = qureg.deviceStateVec.imag;
+    qreal *stateVecReal = qureg.stateVec.real;
+    qreal *stateVecImag = qureg.stateVec.imag;
     qreal alphaImag=alpha.imag, alphaReal=alpha.real;
     qreal betaImag=beta.imag, betaReal=beta.real;
 
@@ -308,8 +242,8 @@ __global__ void statevec_unitaryKernel(Qureg qureg, const int targetQubit, ArgMa
     // ---------------------------------------------------------------- //
 
     //! fix -- no necessary for GPU version
-    qreal *stateVecReal = qureg.deviceStateVec.real;
-    qreal *stateVecImag = qureg.deviceStateVec.imag;
+    qreal *stateVecReal = qureg.stateVec.real;
+    qreal *stateVecImag = qureg.stateVec.imag;
 
     thisTask = blockIdx.x*blockDim.x + threadIdx.x;
     if (thisTask>=numTasks) return;
@@ -363,8 +297,8 @@ __global__ void statevec_multiControlledMultiQubitUnitaryKernel(
     if (ctrlMask && (ctrlMask&ind00) != ctrlMask)
         return;
         
-    qreal *reVec = qureg.deviceStateVec.real;
-    qreal *imVec = qureg.deviceStateVec.imag;
+    qreal *reVec = qureg.stateVec.real;
+    qreal *imVec = qureg.stateVec.imag;
     
     /*
     each thread needs:
@@ -469,8 +403,8 @@ __global__ void statevec_multiControlledTwoQubitUnitaryKernel(Qureg qureg, long 
     long long int numTasks = qureg.numAmpsPerChunk >> 2; // kernel called on every 1 in 4 amplitudes
     if (thisTask>=numTasks) return;
     
-    qreal *reVec = qureg.deviceStateVec.real;
-    qreal *imVec = qureg.deviceStateVec.imag;
+    qreal *reVec = qureg.stateVec.real;
+    qreal *imVec = qureg.stateVec.imag;
     
     // find indices of amplitudes to modify (treat q1 as the least significant bit)
     long long int ind00, ind01, ind10, ind11;
@@ -570,8 +504,8 @@ __global__ void statevec_controlledUnitaryKernel(Qureg qureg, const int controlQ
     // ---------------------------------------------------------------- //
 
     //! fix -- no necessary for GPU version
-    qreal *stateVecReal = qureg.deviceStateVec.real;
-    qreal *stateVecImag = qureg.deviceStateVec.imag;
+    qreal *stateVecReal = qureg.stateVec.real;
+    qreal *stateVecImag = qureg.stateVec.imag;
 
     thisTask = blockIdx.x*blockDim.x + threadIdx.x;
     if (thisTask>=numTasks) return;
@@ -639,8 +573,8 @@ __global__ void statevec_multiControlledUnitaryKernel(
     // ---------------------------------------------------------------- //
 
     //! fix -- no necessary for GPU version
-    qreal *stateVecReal = qureg.deviceStateVec.real;
-    qreal *stateVecImag = qureg.deviceStateVec.imag;
+    qreal *stateVecReal = qureg.stateVec.real;
+    qreal *stateVecImag = qureg.stateVec.imag;
 
     thisTask = blockIdx.x*blockDim.x + threadIdx.x;
     if (thisTask>=numTasks) return;
@@ -705,8 +639,8 @@ __global__ void statevec_pauliXKernel(Qureg qureg, const int targetQubit){
     // ---------------------------------------------------------------- //
 
     //! fix -- no necessary for GPU version
-    qreal *stateVecReal = qureg.deviceStateVec.real;
-    qreal *stateVecImag = qureg.deviceStateVec.imag;
+    qreal *stateVecReal = qureg.stateVec.real;
+    qreal *stateVecImag = qureg.dstateVec.imag;
 
     thisTask = blockIdx.x*blockDim.x + threadIdx.x;
     if (thisTask>=numTasks) return;
@@ -747,8 +681,8 @@ __global__ void statevec_pauliYKernel(Qureg qureg, const int targetQubit, const 
     long long int indexLo       = indexUp + sizeHalfBlock;
     qreal  stateRealUp, stateImagUp;
 
-    qreal *stateVecReal = qureg.deviceStateVec.real;
-    qreal *stateVecImag = qureg.deviceStateVec.imag;
+    qreal *stateVecReal = qureg.stateVec.real;
+    qreal *stateVecImag = qureg.stateVec.imag;
     stateRealUp = stateVecReal[indexUp];
     stateImagUp = stateVecImag[indexUp];
 
@@ -788,8 +722,8 @@ __global__ void statevec_controlledPauliYKernel(Qureg qureg, const int controlQu
     sizeBlock     = 2LL * sizeHalfBlock;
 
     stateVecSize = qureg.numAmpsPerChunk;
-    qreal *stateVecReal = qureg.deviceStateVec.real;
-    qreal *stateVecImag = qureg.deviceStateVec.imag;
+    qreal *stateVecReal = qureg.stateVec.real;
+    qreal *stateVecImag = qureg.stateVec.imag;
 
     index = blockIdx.x*blockDim.x + threadIdx.x;
     if (index>=(stateVecSize>>1)) return;
@@ -857,8 +791,8 @@ __global__ void statevec_phaseShiftByTermKernel(Qureg qureg, const int targetQub
     // sizeHalfBlock = 1LL << targetQubit;
     // sizeBlock     = 2LL * sizeHalfBlock;
 
-    // qreal *stateVecReal = qureg.deviceStateVec.real;
-    // qreal *stateVecImag = qureg.deviceStateVec.imag;
+    qreal *stateVecReal = qureg.stateVec.real;
+    qreal *stateVecImag = qureg.stateVec.imag;
 
     // thisTask = blockIdx.x*blockDim.x + threadIdx.x;
     // if (thisTask>=numTasks) return;
@@ -902,8 +836,8 @@ __global__ void statevec_controlledPhaseShiftKernel(Qureg qureg, const int idQub
     qreal stateRealLo, stateImagLo;
 
     stateVecSize = qureg.numAmpsPerChunk;
-    qreal *stateVecReal = qureg.deviceStateVec.real;
-    qreal *stateVecImag = qureg.deviceStateVec.imag;
+    qreal *stateVecReal = qureg.stateVec.real;
+    qreal *stateVecImag = qureg.stateVec.imag;
 
     index = blockIdx.x*blockDim.x + threadIdx.x;
     if (index>=stateVecSize) return;
@@ -936,8 +870,8 @@ __global__ void statevec_multiControlledPhaseShiftKernel(Qureg qureg, long long 
     long long int stateVecSize;
 
     stateVecSize = qureg.numAmpsPerChunk;
-    qreal *stateVecReal = qureg.deviceStateVec.real;
-    qreal *stateVecImag = qureg.deviceStateVec.imag;
+    qreal *stateVecReal = qureg.stateVec.real;
+    qreal *stateVecImag = qureg.stateVec.imag;
     
     index = blockIdx.x*blockDim.x + threadIdx.x;
     if (index>=stateVecSize) return;
@@ -969,8 +903,8 @@ __global__ void statevec_multiRotateZKernel(Qureg qureg, long long int mask, qre
     long long int index = blockIdx.x*blockDim.x + threadIdx.x;
     if (index>=stateVecSize) return;
     
-    qreal *stateVecReal = qureg.deviceStateVec.real;
-    qreal *stateVecImag = qureg.deviceStateVec.imag;
+    qreal *stateVecReal = qureg.stateVec.real;
+    qreal *stateVecImag = qureg.stateVec.imag;
     
     int fac = getBitMaskParity(mask & index)? -1 : 1;
     qreal stateReal = stateVecReal[index];
@@ -1031,8 +965,8 @@ __global__ void statevec_controlledPhaseFlipKernel(Qureg qureg, const int idQubi
     int bit1, bit2;
 
     stateVecSize = qureg.numAmpsPerChunk;
-    qreal *stateVecReal = qureg.deviceStateVec.real;
-    qreal *stateVecImag = qureg.deviceStateVec.imag;
+    qreal *stateVecReal = qureg.stateVec.real;
+    qreal *stateVecImag = qureg.stateVec.imag;
 
     index = blockIdx.x*blockDim.x + threadIdx.x;
     if (index>=stateVecSize) return;
@@ -1059,8 +993,8 @@ __global__ void statevec_multiControlledPhaseFlipKernel(Qureg qureg, long long i
     long long int stateVecSize;
 
     stateVecSize = qureg.numAmpsPerChunk;
-    qreal *stateVecReal = qureg.deviceStateVec.real;
-    qreal *stateVecImag = qureg.deviceStateVec.imag;
+    qreal *stateVecReal = qureg.stateVec.real;
+    qreal *stateVecImag = qureg.stateVec.imag;
 
     index = blockIdx.x*blockDim.x + threadIdx.x;
     if (index>=stateVecSize) return;
@@ -1082,8 +1016,8 @@ void statevec_multiControlledPhaseFlip(Qureg qureg, int *controlQubits, int numC
 
 __global__ void statevec_swapQubitAmpsKernel(Qureg qureg, int qb1, int qb2) {
 
-    qreal *reVec = qureg.deviceStateVec.real;
-    qreal *imVec = qureg.deviceStateVec.imag;
+    qreal *reVec = qureg.stateVec.real;
+    qreal *imVec = qureg.stateVec.imag;
     
     long long int numTasks = qureg.numAmpsPerChunk >> 2; // each iteration updates 2 amps and skips 2 amps
     long long int thisTask = blockIdx.x*blockDim.x + threadIdx.x;
@@ -1137,8 +1071,8 @@ __global__ void statevec_hadamardKernel (Qureg qureg, const int targetQubit){
     // ---------------------------------------------------------------- //
 
     //! fix -- no necessary for GPU version
-    qreal *stateVecReal = qureg.deviceStateVec.real;
-    qreal *stateVecImag = qureg.deviceStateVec.imag;
+    qreal *stateVecReal = qureg.stateVec.real;
+    qreal *stateVecImag = qureg.stateVec.imag;
 
     qreal recRoot2 = 1.0/sqrt(2.0);
 
@@ -1188,8 +1122,8 @@ __global__ void statevec_controlledNotKernel(Qureg qureg, const int controlQubit
     sizeBlock     = 2LL * sizeHalfBlock;                           // size of blocks
 
     stateVecSize = qureg.numAmpsPerChunk;
-    qreal *stateVecReal = qureg.deviceStateVec.real;
-    qreal *stateVecImag = qureg.deviceStateVec.imag;
+    qreal *stateVecReal = qureg.stateVec.real;
+    qreal *stateVecImag = qureg.stateVec.imag;
 
     index = blockIdx.x*blockDim.x + threadIdx.x;
     if (index>=(stateVecSize>>1)) return;
@@ -1286,8 +1220,8 @@ __global__ void statevec_findProbabilityOfZeroKernel(
     // --- task-based shared-memory parallel implementation
     //
 
-    qreal *stateVecReal = qureg.deviceStateVec.real;
-    qreal *stateVecImag = qureg.deviceStateVec.imag;
+    qreal *stateVecReal = qureg.stateVec.real;
+    qreal *stateVecImag = qureg.stateVec.imag;
 
     thisTask = blockIdx.x*blockDim.x + threadIdx.x;
     if (thisTask>=numTasks) return;
@@ -1305,25 +1239,7 @@ __global__ void statevec_findProbabilityOfZeroKernel(
     }
 }
 
-int getNumReductionLevels(long long int numValuesToReduce, int numReducedPerLevel){
-    int levels=0;
-    while (numValuesToReduce){
-        numValuesToReduce = numValuesToReduce/numReducedPerLevel;
-        levels++;
-    }
-    return levels;
-}
-
-void swapDouble(qreal **a, qreal **b){
-    qreal *temp;
-    temp = *a;
-    *a = *b;
-    *b = temp;
-}
-
-
-
-qreal statevec_findProbabilityOfZero(Qureg qureg, const int measureQubit)
+qreal statevec_findProbabilityOfZeroLocal(Qureg qureg, const int measureQubit)
 {
     long long int numValuesToReduce = qureg.numAmpsPerChunk>>1;
     int valuesPerCUDABlock, numCUDABlocks, sharedMemSize;
@@ -1360,16 +1276,6 @@ qreal statevec_findProbabilityOfZero(Qureg qureg, const int measureQubit)
     cudaMemcpy(&stateProb, qureg.firstLevelReduction, sizeof(qreal), cudaMemcpyDeviceToHost);
     return stateProb;
 }
-
-qreal statevec_calcProbOfOutcomeLocal(Qureg qureg, const int measureQubit, int outcome)
-{
-    qreal outcomeProb = statevec_findProbabilityOfZeroLocal(qureg, measureQubit);
-    if (outcome==1)
-        outcomeProb = 1.0 - outcomeProb;
-    return outcomeProb;
-}
-
-
 
 /** computes either a real or imag term in the inner product */
 __global__ void statevec_calcInnerProductKernel(
@@ -1430,8 +1336,8 @@ Complex statevec_calcInnerProductLocal(Qureg bra, Qureg ket) {
         if (firstTime) {
              statevec_calcInnerProductKernel<<<numCUDABlocks, valuesPerCUDABlock, sharedMemSize, mpi4cudaGetCurrentStream()>>>(
                  getRealComp,
-                 bra.deviceStateVec.real, bra.deviceStateVec.imag, 
-                 ket.deviceStateVec.real, ket.deviceStateVec.imag, 
+                 bra.stateVec.real, bra.stateVec.imag, 
+                 ket.stateVec.real, ket.stateVec.imag, 
                  numValuesToReduce, 
                  bra.firstLevelReduction);
             firstTime = 0;
@@ -1465,8 +1371,8 @@ Complex statevec_calcInnerProductLocal(Qureg bra, Qureg ket) {
         if (firstTime) {
              statevec_calcInnerProductKernel<<<numCUDABlocks, valuesPerCUDABlock, sharedMemSize, mpi4cudaGetCurrentStream()>>>(
                  getRealComp,
-                 bra.deviceStateVec.real, bra.deviceStateVec.imag, 
-                 ket.deviceStateVec.real, ket.deviceStateVec.imag, 
+                 bra.stateVec.real, bra.stateVec.imag, 
+                 ket.stateVec.real, ket.stateVec.imag, 
                  numValuesToReduce, 
                  bra.firstLevelReduction);
             firstTime = 0;
@@ -1521,8 +1427,8 @@ __global__ void statevec_collapseToKnownProbOutcomeKernel(Qureg qureg, int measu
     // --- task-based shared-memory parallel implementation
     //
     renorm=1/sqrt(totalProbability);
-    qreal *stateVecReal = qureg.deviceStateVec.real;
-    qreal *stateVecImag = qureg.deviceStateVec.imag;
+    qreal *stateVecReal = qureg.stateVec.real;
+    qreal *stateVecImag = qureg.stateVec.imag;
 
     thisTask = blockIdx.x*blockDim.x + threadIdx.x;
     if (thisTask>=numTasks) return;
@@ -1564,12 +1470,12 @@ __global__ void statevec_setWeightedQuregKernel(Complex fac1, Qureg qureg1, Comp
     long long int numAmpsToVisit = qureg1.numAmpsPerChunk;
     if (ampInd >= numAmpsToVisit) return;
 
-    qreal *vecRe1 = qureg1.deviceStateVec.real;
-    qreal *vecIm1 = qureg1.deviceStateVec.imag;
-    qreal *vecRe2 = qureg2.deviceStateVec.real;
-    qreal *vecIm2 = qureg2.deviceStateVec.imag;
-    qreal *vecReOut = out.deviceStateVec.real;
-    qreal *vecImOut = out.deviceStateVec.imag;
+    qreal *vecRe1 = qureg1.stateVec.real;
+    qreal *vecIm1 = qureg1.stateVec.imag;
+    qreal *vecRe2 = qureg2.stateVec.real;
+    qreal *vecIm2 = qureg2.stateVec.imag;
+    qreal *vecReOut = out.stateVec.real;
+    qreal *vecImOut = out.stateVec.imag;
 
     qreal facRe1 = fac1.real; 
     qreal facIm1 = fac1.imag;

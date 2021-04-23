@@ -188,7 +188,12 @@ int getChunkIdFromIndex(Qureg qureg, long long int index){
     return index/qureg.numAmpsPerChunk; // this is numAmpsPerChunk
 }
 
-
+void swapDouble(qreal **a, qreal **b){
+    qreal *temp;
+    temp = *a;
+    *a = *b;
+    *b = temp;
+}
 
 /* Functions from QuEST_gpu_local.cu */
 
