@@ -1,6 +1,5 @@
 #include "QuEST_gpu_local.cu"
 #include "QuEST_gpu.h"
-#include "cuMPI/cuMPI_runtime.h"
 #include "cuMPI/src/cuMPI_runtime.h"
 
 /********************** For cuMPI environment **********************/
@@ -2343,7 +2342,7 @@ __global__ void statevec_initZeroStateKernel(long long int stateVecSize, qreal *
 void statevec_initZeroState(Qureg qureg)
 {
   // stage 1 done!
-  
+
   if (qureg.chunkId==0) {
 
     int threadsPerCUDABlock, CUDABlocks;
@@ -2361,6 +2360,71 @@ void statevec_initZeroState(Qureg qureg)
     statevec_initBlankState(qureg);
   }
 
+}
+
+// returns 1 if successful, else 0
+int statevec_initStateFromSingleFile(Qureg *qureg, char filename[200], QuESTEnv env){
+  // stage 1 done!
+
+  long long int chunkSize, stateVecSize;
+  long long int indexInChunk, totalIndex;
+
+  chunkSize = qureg->numAmpsPerChunk;
+  stateVecSize = chunkSize*qureg->numChunks;
+
+  // qreal *stateVecReal = qureg->stateVec.real;
+  // qreal *stateVecImag = qureg->stateVec.imag;
+  qreal *tempStateVecReal = (qreal *)malloc(chunkSize * sizeof(qreal));
+  qreal *tempStateVecImag = (qreal *)malloc(chunkSize * sizeof(qreal));
+
+  FILE *fp;
+  char line[200];
+
+  for (int rank=0; rank<(qureg->numChunks); rank++){
+      if (rank==qureg->chunkId){
+          fp = fopen(filename, "r");
+
+          // indicate file open failure
+          if (fp == NULL)
+              return 0;
+
+          indexInChunk = 0; totalIndex = 0;
+          while (fgets(line, sizeof(char)*200, fp) != NULL && totalIndex<stateVecSize){
+              if (line[0]!='#'){
+                  int chunkId = (int) (totalIndex/chunkSize);
+                  if (chunkId==qureg->chunkId){
+                      # if QuEST_PREC==1
+                      sscanf(line, "%f, %f", &(tempStateVecReal[indexInChunk]),
+                              &(tempStateVecImag[indexInChunk]));
+                      # elif QuEST_PREC==2
+                      sscanf(line, "%lf, %lf", &(tempStateVecReal[indexInChunk]),
+                              &(tempStateVecImag[indexInChunk]));
+                      # elif QuEST_PREC==4
+                      sscanf(line, "%Lf, %Lf", &(tempStateVecReal[indexInChunk]),
+                              &(tempStateVecImag[indexInChunk]));
+                      # endif
+                      indexInChunk += 1;
+                  }
+                  totalIndex += 1;
+              }
+          }
+          fclose(fp);
+      }
+      syncQuESTEnv(env);
+  }
+
+  // copy state to GPU
+  cudaDeviceSynchronize();
+  if (DEBUG) printf("Copying data to GPU\n");
+  cudaMemcpy(qureg->stateVec.real, tempStateVecReal, 
+          chunkSize*sizeof(qreal), cudaMemcpyHostToDevice);
+  cudaMemcpy(qureg->stateVec.imag, tempStateVecImag, 
+          chunkSize*sizeof(qreal), cudaMemcpyHostToDevice);
+  if (DEBUG) printf("Finished copying data to GPU\n");
+
+
+  // indicate success
+  return 1;
 }
 
 
@@ -2426,7 +2490,7 @@ void statevec_setAmps(Qureg qureg, long long int startInd, qreal* reals, qreal* 
 /** works for both statevectors and density matrices */
 void statevec_cloneQureg(Qureg targetQureg, Qureg copyQureg) {
   // stage 1 done!
-  
+
   // copy copyQureg's GPU statevec to targetQureg's GPU statevec
   cudaDeviceSynchronize();
   cudaMemcpy(
@@ -2439,6 +2503,86 @@ void statevec_cloneQureg(Qureg targetQureg, Qureg copyQureg) {
       copyQureg.stateVec.imag, 
       targetQureg.numAmpsPerChunk*sizeof(*(targetQureg.stateVec.imag)), 
       cudaMemcpyDeviceToDevice);
+}
+
+void getEnvironmentString(QuESTEnv env, Qureg qureg, char str[200]){
+  sprintf(str, "%dqubits_GPU_noMpi_noOMP", qureg.numQubitsInStateVec);    
+}
+
+void copyStateToGPU(Qureg qureg)
+{
+  assert( 0 );
+  // don't call this function, the content has been injected into certain code.
+}
+
+void copyStateFromGPU(Qureg qureg)
+{
+  assert( 0 );
+  // don't call this function, the content has been injected into certain code.
+}
+
+/** Print the current state vector of probability amplitudes for a set of qubits to standard out. 
+  For debugging purposes. Each rank should print output serially. Only print output for systems <= 5 qubits
+ */
+__global__ void statevec_reportStateToScreenSingleKernel(
+  const long long int chunkSize, 
+  qreal *stateVecReal, 
+  qreal *stateVecImag
+){
+  long long int index;
+  for(index=0; index<chunkSize; index++){
+      //printf(REAL_STRING_FORMAT ", " REAL_STRING_FORMAT "\n", qureg.pairStateVec.real[index], qureg.pairStateVec.imag[index]);
+      printf(REAL_STRING_FORMAT ", " REAL_STRING_FORMAT "\n", stateVecReal[index], stateVecImag[index]);
+  }
+}
+void statevec_reportStateToScreen(Qureg qureg, QuESTEnv env, int reportRank){
+  // stage 1 done!
+  
+  int rank;
+  if (qureg.numQubitsInStateVec<=5){
+      for (rank=0; rank<qureg.numChunks; rank++){
+          if (qureg.chunkId==rank){
+              if (reportRank) {
+                  printf("Reporting state from rank %d [\n", qureg.chunkId);
+                  printf("real, imag\n");
+              } else if (rank==0) {
+                  printf("Reporting state [\n");
+                  printf("real, imag\n");
+              }
+
+              cudaDeviceSynchronize();
+              statevec_reportStateToScreenSingleKernel<<<1, 1>>> (qureg.numAmpsPerChunk, qureg.stateVec.real, qureg.stateVec.imag);
+              
+              if (reportRank || rank==qureg.numChunks-1) printf("]\n");
+          }
+          syncQuESTEnv(env);
+      }
+  } else printf("Error: reportStateToScreen will not print output for systems of more than 5 qubits.\n");
+}
+
+
+qreal statevec_getRealAmp(Qureg qureg, long long int index){
+  // stage 1 done!
+
+  int chunkId = getChunkIdFromIndex(qureg, index);
+  qreal el; 
+  if (qureg.chunkId==chunkId){
+      el = statevec_getRealAmpLocal(index-chunkId*qureg.numAmpsPerChunk);
+  }
+  cuMPI_Bcast(&el, 1, cuMPI_QuEST_REAL, chunkId, cuMPI_COMM_WORLD);
+  return el; 
+} 
+
+qreal statevec_getImagAmp(Qureg qureg, long long int index){
+  // stage 1 done!
+
+  int chunkId = getChunkIdFromIndex(qureg, index);
+  qreal el; 
+  if (qureg.chunkId==chunkId){
+      el = statevec_getImagAmpLocal(index-chunkId*qureg.numAmpsPerChunk);
+  }
+  cuMPI_Bcast(&el, 1, cuMPI_QuEST_REAL, chunkId, cuMPI_COMM_WORLD);
+  return el; 
 }
 
 
