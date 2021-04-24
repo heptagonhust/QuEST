@@ -29,7 +29,7 @@ set(PRECISION 2 CACHE STRING
 
 option(GPUACCELERATED "Whether to program will run on GPU. Set to 1 to enable" 1)
 
-set(GPU_COMPUTE_CAPABILITY 35 CACHE STRING "GPU hardware dependent, lookup at https://developer.nvidia.com/cuda-gpus. Write without fullstop")
+set(GPU_COMPUTE_CAPABILITY 70 CACHE STRING "GPU hardware dependent, lookup at https://developer.nvidia.com/cuda-gpus. Write without fullstop")
 
 
 
@@ -108,7 +108,13 @@ if (DISTRIBUTED)
 endif()
 
 if (GPUACCELERATED)
+    find_package(MPI REQUIRED)
     find_package(CUDA REQUIRED)
+    if (NOT CUDA_FOUND)
+        message(STATUS "CUDA not found. Project will not be built.")
+    endif(NOT CUDA_FOUND)
+
+    include_directories(/usr/local/cuda/include ${MPI_INCLUDE_PATH})
 endif()
 
 
@@ -269,6 +275,7 @@ add_subdirectory(src)
 if (GPUACCELERATED)
     cuda_add_library(QuEST SHARED
         ${QuEST_SRC}
+        /libcuMPI.so
     )
 elseif (WIN32)
     add_library(QuEST STATIC
