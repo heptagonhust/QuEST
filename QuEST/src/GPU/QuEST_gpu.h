@@ -195,9 +195,67 @@ void swapDouble(qreal **a, qreal **b){
     *b = temp;
 }
 
+/* Inline tools for GPU version */
+inline void setRealInDevice(qreal *d_ptr, qreal *h_ptr) {
+    cudaDeviceSynchronize();
+    cudaMemcpy(d_ptr, h_ptr, sizeof(qreal), cudaMemcpyHostToDevice);
+}
+inline qreal getRealInDevice(qreal *d_ptr) {
+    cudaDeviceSynchronize();
+    qreal ret = 0;
+    cudaMemcpy(&ret, d_ptr), sizeof(qreal), cudaMemcpyDeviceToHost);
+    return ret;
+}
+inline qreal* mallocZeroRealInDevice(size_t count) {
+    qreal *ret = NULL;
+    cudaMalloc(&ret, count);
+    cudaMemset(ret, 0, count);
+    return ret;
+}
+inline void freeRealInDevice(qreal *d_ptr) {
+    cudaFree(d_ptr);
+}
+
+inline void setVarInDevice(void *d_ptr, void *h_ptr, size_t size) {
+    cudaDeviceSynchronize();
+    cudaMemcpy(d_ptr, h_ptr, size, cudaMemcpyHostToDevice);
+}
+inline int getIntInDevice(void *d_ptr) {
+    cudaDeviceSynchronize();
+    int ret = 0;
+    cudaMemcpy(&ret, d_ptr), sizeof(int), cudaMemcpyDeviceToHost);
+    return ret;
+}
+inline void* mallocZeroVarInDevice(size_t count) {
+    void *ret = NULL;
+    cudaMalloc(&ret, count);
+    cudaMemset(ret, 0, count);
+    return ret;
+}
+inline void freeVarInDevice(void *d_ptr) {
+    cudaFree(d_ptr);
+}
+
 /* Functions from QuEST_gpu_local.cu */
 
 qreal statevec_getRealAmpLocal(Qureg qureg, long long int index);
 qreal statevec_getImagAmpLocal(Qureg qureg, long long int index);
 
+Complex statevec_calcInnerProductLocal(Qureg bra, Qureg ket);
+void statevec_compactUnitaryLocal(Qureg qureg, const int targetQubit, Complex alpha, Complex beta);
+// void statevec_unitaryLocal(Qureg qureg, const int targetQubit, ComplexMatrix2 u);
+void statevec_controlledCompactUnitaryLocal(Qureg qureg, const int controlQubit, const int targetQubit, Complex alpha, Complex beta);
+// void statevec_controlledUnitaryLocal(Qureg qureg, const int controlQubit, const int targetQubit, ComplexMatrix2 u);
+// void statevec_multiControlledUnitaryLocal(Qureg qureg, long long int ctrlQubitsMask, long long int ctrlFlipMask, const int targetQubit, ComplexMatrix2 u);
+void statevec_pauliXLocal(Qureg qureg, const int targetQubit);
+void statevec_controlledNotLocal(Qureg qureg, const int controlQubit, const int targetQubit);
+void statevec_pauliYLocal(Qureg qureg, const int targetQubit);
+void statevec_controlledPauliYLocal(Qureg qureg, const int controlQubit, const int targetQubit);
+void statevec_controlledPauliYConjLocal(Qureg qureg, const int controlQubit, const int targetQubit);
+void statevec_hadamardLocal(Qureg qureg, const int targetQubit);
+qreal statevec_findProbabilityOfZeroLocal(Qureg qureg, const int measureQubit);
+// void statevec_collapseToKnownProbOutcomeLocal(Qureg qureg, const int measureQubit, int outcome, qreal outcomeProb);
+// void statevec_swapQubitAmpsLocal(Qureg qureg, int qb1, int qb2);
+// void statevec_multiControlledTwoQubitUnitaryLocal(Qureg qureg, long long int ctrlMask, const int q1, const int q2, ComplexMatrix4 u);
+// void statevec_multiControlledMultiQubitUnitaryLocal(Qureg qureg, long long int ctrlMask, int* targs, const int numTargs, ComplexMatrixN u);
 #endif

@@ -1,4 +1,3 @@
-#include "QuEST_gpu_local.cu"
 #include "QuEST_gpu.h"
 #include "cuMPI/src/cuMPI_runtime.h"
 
@@ -12,11 +11,14 @@ cuMPI_Comm comm;            // cuMPI comm
 cudaStream_t defaultStream; // CUDA stream generated for each GPU
 uint64_t hostHashs[10];     // host name hash in cuMPI
 char hostname[1024];        // host name for identification in cuMPI
+#define cuMPI_COMM_WORLD comm
+#define cuMPI_QuEST_REAL MPI_QuEST_REAL
+#define cuMPI_MAX_AMPS_IN_MSG MPI_MAX_AMPS_IN_MSG
 /*******************************************************************/
 
-//cudampiinit
-//cudaAllreduce
-//cuMPI_Broadcast
+//cuMPI_Init
+//cuMPI_Allreduce
+//cuMPI_Brcast
 //cuMPI_SendRecv
 
 void copyStateFromCurrentGPU(Qureg qureg){
@@ -25,59 +27,97 @@ void copyStateFromCurrentGPU(Qureg qureg){
 
 Complex statevec_calcInnerProduct(Qureg bra, Qureg ket) {
   // stage 1 done! (mode 1)
+  // cuMPI done!
 
   Complex localInnerProd = statevec_calcInnerProductLocal(bra, ket);
   if (bra.numChunks == 1)
     return localInnerProd;
   
-  qreal localReal = localInnerProd.real;
-  qreal localImag = localInnerProd.imag;
-  qreal globalReal, globalImag;
-  cuMPI_Allreduce(&localReal, &globalReal, 1, cuMPI_QuEST_REAL, cuMPI_SUM, cuMPI_COMM_WORLD);
-  cuMPI_Allreduce(&localImag, &globalImag, 1, cuMPI_QuEST_REAL, cuMPI_SUM, cuMPI_COMM_WORLD);
+  qreal *localReal = mallocZeroRealInDevice(sizeof(qreal));
+  qreal *localImag = mallocZeroRealInDevice(sizeof(qreal));
+
+  setRealInDevice(localReal, &(localInnerProd.real));
+  setRealInDevice(localImag, &(localInnerProd.imag));
+  
+  qreal *globalReal = mallocZeroRealInDevice(sizeof(qreal));
+  qreal *globalImag = mallocZeroRealInDevice(sizeof(qreal));
+
+  cuMPI_Allreduce(localReal, globalReal, 1, cuMPI_QuEST_REAL, cuMPI_SUM, cuMPI_COMM_WORLD);
+  cuMPI_Allreduce(localImag, globalImag, 1, cuMPI_QuEST_REAL, cuMPI_SUM, cuMPI_COMM_WORLD);
 
   Complex globalInnerProd;
-  globalInnerProd.real = globalReal;
-  globalInnerProd.imag = globalImag;
+  globalInnerProd.real = getRealInDevice(globalReal);
+  globalInnerProd.imag = getRealInDevice(globalImag);
+  
+  freeRealInDevice(localReal);
+  freeRealInDevice(localImag);
+  freeRealInDevice(globalReal);
+  freeRealInDevice(globalImag);
+
   return globalInnerProd;
 }
 
 
-qreal statevec_calcTotalProbLocal(Qureg qureg){
-  // phase 1 done! (mode 2)
-  // gpu local is almost same with cpu local
-
+__global__ void statevec_calcTotalProbDistributedKernel (
+  const long long int chunkSize, 
+  qreal *stateVecReal, 
+  qreal *stateVecImag,
+  qreal *pTotal
+){
   // Implemented using Kahan summation for greater accuracy at a slight floating
   //   point operation overhead. For more details see https://en.wikipedia.org/wiki/Kahan_summation_algorithm
-  qreal pTotal=0;
+  // qreal pTotal=0;
   qreal y, t, c;
-  qreal allRankTotals=0;
-  long long int index;
-  long long int numAmpsPerRank = qureg.numAmpsPerChunk;
 
-  copyStateFromCurrentGPU(qureg);
+  long long int index;
+  long long int numAmpsPerRank = chunkSize;
+
+  long long int thisTask = blockIdx.x*blockDim.x + threadIdx.x;
+  if (thisTask>=numAmpsPerRank) return;
+  // copyStateFromCurrentGPU(qureg);
 
   c = 0.0;
   for (index=0; index<numAmpsPerRank; index++){
-      // Perform pTotal+=qureg.stateVec.real[index]*qureg.stateVec.real[index]; by Kahan
-      y = qureg.stateVec.real[index]*qureg.stateVec.real[index] - c;
-      t = pTotal + y;
-      // Don't change the bracketing on the following line
-      c = ( t - pTotal ) - y;
-      pTotal = t;
-      // Perform pTotal+=qureg.stateVec.imag[index]*qureg.stateVec.imag[index]; by Kahan
-      y = qureg.stateVec.imag[index]*qureg.stateVec.imag[index] - c;
-      t = pTotal + y;
-      // Don't change the bracketing on the following line
-      c = ( t - pTotal ) - y;
-      pTotal = t;
+    // Perform pTotal+=qureg.stateVec.real[index]*qureg.stateVec.real[index]; by Kahan
+    y = stateVecReal[index]*stateVecReal[index] - c;
+    t = *pTotal + y;
+    // Don't change the bracketing on the following line
+    c = ( t - *pTotal ) - y;
+    *pTotal = t;
+    // Perform pTotal+=qureg.stateVec.imag[index]*qureg.stateVec.imag[index]; by Kahan
+    y = stateVecImag[index]*stateVecImag[index] - c;
+    t = *pTotal + y;
+    // Don't change the bracketing on the following line
+    c = ( t - *pTotal ) - y;
+    *pTotal = t;
   }
+}
+
+qreal statevec_calcTotalProbDistributed(Qureg qureg){
+  // stage 1 done! fixed cuMPI device memory.
+  // cuMPI done!
+
+  // ~~phase 1 done! (mode 2)~~
+  // gpu local is almost same with cpu local
+
+  qreal *pTotal = mallocZeroRealInDevice(sizeof(qreal));
+  qreal *allRankTotals = mallocZeroRealInDevice(sizeof(qreal));
+  statevec_calcTotalProbDistributedKernel<<<1, 1>>>(
+    qureg.numAmpsPerChunk,
+    qureg.stateVec.real,
+    qureg.stateVec.imag,
+    pTotal
+  );
+  
   if (qureg.numChunks>1)
-    MPI_Allreduce(&pTotal, &allRankTotals, 1, MPI_QuEST_REAL, MPI_SUM, MPI_COMM_WORLD);
+    cuMPI_Allreduce(pTotal, allRankTotals, 1, cuMPI_QuEST_REAL, cuMPI_SUM, cuMPI_COMM_WORLD);
   else
     allRankTotals=pTotal;
 
-  return allRankTotals;
+  qreal ret = getRealInDevice(allRankTotals);
+  freeRealInDevice(pTotal);
+  freeRealInDevice(allRankTotals);
+  return ret;
 }
 
 static int isChunkToSkipInFindPZero(int chunkId, long long int chunkSize, int measureQubit);
@@ -114,7 +154,8 @@ int GPUExists(void){
 }
 
 QuESTEnv createQuESTEnv(void) {
-  // stage 1 done! changed to cuMPI.
+  // stage 1 done! ~~changed to cuMPI.~~
+  // cuMPI done!
   
   // Local version is similar to cpu_local version. +yh
 
@@ -125,15 +166,15 @@ QuESTEnv createQuESTEnv(void) {
 
   QuESTEnv env;
 
-  // init MPI environment
+  // init cuMPI environment
   // int rank, numRanks, initialized;
   int initialized;
   cuMPI_Initialized(&initialized);
   if (!initialized){
 
     cuMPI_Init(NULL, NULL);
-    // cuMPI_Comm_size(MPI_COMM_WORLD, &numRanks);
-    // cuMPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    // cuMPI_Comm_size(cuMPI_COMM_WORLD, &numRanks);
+    // cuMPI_Comm_rank(cuMPI_COMM_WORLD, &rank);
 
     env.rank=myRank;
     env.numRanks=nRanks;
@@ -144,8 +185,8 @@ QuESTEnv createQuESTEnv(void) {
     printf("ERROR: Trying to initialize QuESTEnv multiple times. Ignoring...\n");
 
     // ensure env is initialised anyway, so the compiler is happy
-    // MPI_Comm_size(MPI_COMM_WORLD, &numRanks);
-    // MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    // cuMPI_Comm_size(cuMPI_COMM_WORLD, &numRanks);
+    // cuMPI_Comm_rank(cuMPI_COMM_WORLD, &rank);
     env.rank=rank;
     env.numRanks=numRanks;
 
@@ -158,18 +199,29 @@ QuESTEnv createQuESTEnv(void) {
 
 void syncQuESTEnv(QuESTEnv env){
   // stage 1 done!
-  // After computation in GPU device is done, synchronize MPI message. 
+  // cuMPI done!
+  // After computation in GPU device is done, synchronize cuMPI message. 
   cudaDeviceSynchronize();
   cuMPI_Barrier(cuMPI_COMM_WORLD);
 }
 
 int syncQuESTSuccess(int successCode){
   // stage 1 done!
+  // cuMPI done!
   // nothing to do for GPU method.
-  int totalSuccess;
+  int *totalSuccess = (int *)mallocZeroVarInDevice(sizeof(int));
+
+  int *d_successCode = (int *)mallocZeroVarInDevice(sizeof(int));
+  setVarInDevice(d_successCode, &d_successCode, sizeof(int));
+
   // MPI_LAND logic and
-  cuMPI_Allreduce(&successCode, &totalSuccess, 1, cuMPI_INT, cuMPI_MIN, cuMPI_COMM_WORLD);
-  return totalSuccess;
+  cuMPI_Allreduce(d_successCode, totalSuccess, 1, cuMPI_INT, cuMPI_MIN, cuMPI_COMM_WORLD);
+
+  int ret = getIntInDevice(totalSuccess);
+  freeVarInDevice(totalSuccess);
+  freeVarInDevice(d_successCode);
+
+  return ret;
 }
 
 void destroyQuESTEnv(QuESTEnv env){
@@ -189,33 +241,43 @@ void reportQuESTEnv(QuESTEnv env){
 }
 
 qreal statevec_getRealAmp(Qureg qureg, long long int index){
-  // phase 1 done! (mode 3)
+  // stage 1 done! need to optimized, no need to malloc new memory variable.
+  // cuMPI done!
+  // ~~phase 1 done! (mode 3)~~
   // direct copy from device state memory
 
   int chunkId = getChunkIdFromIndex(qureg, index);
-  qreal el=0;
+  qreal *el = mallocZeroRealInDevice(sizeof(qreal));
   if (qureg.chunkId==chunkId){
       // el = qureg.stateVec.real[index-chunkId*qureg.numAmpsPerChunk];
-      cudaMemcpy(&el, &(qureg.deviceStateVec.real[index-chunkId*qureg.numAmpsPerChunk]), 
-        sizeof(*(qureg.deviceStateVec.real)), cudaMemcpyDeviceToHost);
+      cudaMemcpy(el, &(qureg.stateVec.real[index-chunkId*qureg.numAmpsPerChunk]), 
+        sizeof(*(qureg.stateVec.real)), cudaMemcpyDeviceToDevice);
   }
-  cuMPI_Bcast(&el, 1, MPI_QuEST_REAL, chunkId, MPI_COMM_WORLD);
-  return el;
+  cuMPI_Bcast(el, 1, cuMPI_QuEST_REAL, chunkId, cuMPI_COMM_WORLD);
+
+  qreal ret = getRealInDevice(el);
+  freeRealInDevice(el);
+  return ret;
 }
 
 qreal statevec_getImagAmp(Qureg qureg, long long int index){
-  // phase 1 done! (mode 3)
+  // stage 1 done! need to optimized, no need to malloc new memory variable.
+  // cuMPI done!
+  // ~~phase 1 done! (mode 3)~~
   // direct copy from device state memory
 
   int chunkId = getChunkIdFromIndex(qureg, index);
-  qreal el=0;
+  qreal *el = mallocZeroRealInDevice(sizeof(qreal));
   if (qureg.chunkId==chunkId){
       //el = qureg.stateVec.imag[index-chunkId*qureg.numAmpsPerChunk];
-      cudaMemcpy(&el, &(qureg.deviceStateVec.imag[index-chunkId*qureg.numAmpsPerChunk]), 
-        sizeof(*(qureg.deviceStateVec.imag)), cudaMemcpyDeviceToHost);
+      cudaMemcpy(el, &(qureg.stateVec.imag[index-chunkId*qureg.numAmpsPerChunk]), 
+        sizeof(*(qureg.stateVec.imag)), cudaMemcpyDeviceToDevice);
   }
-  cuMPI_Bcast(&el, 1, MPI_QuEST_REAL, chunkId, MPI_COMM_WORLD);
-  return el;
+  cuMPI_Bcast(el, 1, cuMPI_QuEST_REAL, chunkId, cuMPI_COMM_WORLD);
+
+  qreal ret = getRealInDevice(el);
+  freeRealInDevice(el);
+  return ret;
 }
 
 
@@ -378,19 +440,21 @@ static int densityMatrixBlockFitsInChunk(long long int chunkSize, int numQubits,
 
 void exchangeStateVectors(Qureg qureg, int pairRank){
   // stage 1 done!
+  // cuMPI done!
 
-  // MPI send/receive vars
+  // cuMPI send/receive vars
+  
   int TAG=100;
-  MPI_Status status;
+  cuMPI_Status status;
 
-  // Multiple messages are required as MPI uses int rather than long long int for count
+  // Multiple messages are required as cuMPI uses int rather than long long int for count
   // For openmpi, messages are further restricted to 2GB in size -- do this for all cases
   // to be safe
-  long long int maxMessageCount = MPI_MAX_AMPS_IN_MSG;
+  long long int maxMessageCount = cuMPI_MAX_AMPS_IN_MSG;
   if (qureg.numAmpsPerChunk < maxMessageCount)
       maxMessageCount = qureg.numAmpsPerChunk;
 
-  // safely assume MPI_MAX... = 2^n, so division always exact
+  // safely assume cuMPI_MAX... = 2^n, so division always exact
   int numMessages = qureg.numAmpsPerChunk/maxMessageCount;
   int i;
   long long int offset;
@@ -398,30 +462,33 @@ void exchangeStateVectors(Qureg qureg, int pairRank){
   // receive pairRank's state vector into qureg.pairStateVec
   for (i=0; i<numMessages; i++){
       offset = i*maxMessageCount;
-      cuMPI_Sendrecv(&qureg.stateVec.real[offset], maxMessageCount, MPI_QuEST_REAL, pairRank, TAG,
-              &qureg.pairStateVec.real[offset], maxMessageCount, MPI_QuEST_REAL,
-              pairRank, TAG, MPI_COMM_WORLD, &status);
+      cuMPI_Sendrecv(&qureg.stateVec.real[offset], maxMessageCount, cuMPI_QuEST_REAL, pairRank, TAG,
+              &qureg.pairStateVec.real[offset], maxMessageCount, cuMPI_QuEST_REAL,
+              pairRank, TAG, cuMPI_COMM_WORLD, &status);
       //printf("rank: %d err: %d\n", qureg.rank, err);
-      cuMPI_Sendrecv(&qureg.stateVec.imag[offset], maxMessageCount, MPI_QuEST_REAL, pairRank, TAG,
-              &qureg.pairStateVec.imag[offset], maxMessageCount, MPI_QuEST_REAL,
-              pairRank, TAG, MPI_COMM_WORLD, &status);
+      cuMPI_Sendrecv(&qureg.stateVec.imag[offset], maxMessageCount, cuMPI_QuEST_REAL, pairRank, TAG,
+              &qureg.pairStateVec.imag[offset], maxMessageCount, cuMPI_QuEST_REAL,
+              pairRank, TAG, cuMPI_COMM_WORLD, &status);
   }
 }
 
 void exchangePairStateVectorHalves(Qureg qureg, int pairRank){
-  // MPI send/receive vars
+  // stage 1 done!
+  // cuMPI done!
+
+  // cuMPI send/receive vars
   int TAG=100;
-  MPI_Status status;
+  cuMPI_Status status;
   long long int numAmpsToSend = qureg.numAmpsPerChunk >> 1;
 
-  // Multiple messages are required as MPI uses int rather than long long int for count
+  // Multiple messages are required as cuMPI uses int rather than long long int for count
   // For openmpi, messages are further restricted to 2GB in size -- do this for all cases
   // to be safe
-  long long int maxMessageCount = MPI_MAX_AMPS_IN_MSG;
+  long long int maxMessageCount = cuMPI_MAX_AMPS_IN_MSG;
   if (numAmpsToSend < maxMessageCount)
       maxMessageCount = numAmpsToSend;
 
-  // safely assume MPI_MAX... = 2^n, so division always exact
+  // safely assume cuMPI_MAX... = 2^n, so division always exact
   int numMessages = numAmpsToSend/maxMessageCount;
   int i;
   long long int offset;
@@ -429,15 +496,15 @@ void exchangePairStateVectorHalves(Qureg qureg, int pairRank){
   // receive pairRank's state vector into the top of qureg.pairStateVec
   for (i=0; i<numMessages; i++){
       offset = i*maxMessageCount;
-      MPI_Sendrecv(&qureg.pairStateVec.real[offset+numAmpsToSend], maxMessageCount,
-              MPI_QuEST_REAL, pairRank, TAG,
-              &qureg.pairStateVec.real[offset], maxMessageCount, MPI_QuEST_REAL,
-              pairRank, TAG, MPI_COMM_WORLD, &status);
+      cuMPI_Sendrecv(&qureg.pairStateVec.real[offset+numAmpsToSend], maxMessageCount,
+              cuMPI_QuEST_REAL, pairRank, TAG,
+              &qureg.pairStateVec.real[offset], maxMessageCount, cuMPI_QuEST_REAL,
+              pairRank, TAG, cuMPI_COMM_WORLD, &status);
       //printf("rank: %d err: %d\n", qureg.rank, err);
-      MPI_Sendrecv(&qureg.pairStateVec.imag[offset+numAmpsToSend], maxMessageCount,
-              MPI_QuEST_REAL, pairRank, TAG,
-              &qureg.pairStateVec.imag[offset], maxMessageCount, MPI_QuEST_REAL,
-              pairRank, TAG, MPI_COMM_WORLD, &status);
+      cuMPI_Sendrecv(&qureg.pairStateVec.imag[offset+numAmpsToSend], maxMessageCount,
+              cuMPI_QuEST_REAL, pairRank, TAG,
+              &qureg.pairStateVec.imag[offset], maxMessageCount, cuMPI_QuEST_REAL,
+              pairRank, TAG, cuMPI_COMM_WORLD, &status);
   }
 }
 
@@ -1405,20 +1472,32 @@ __global__ void statevec_findProbabilityOfZeroDistributed (
 qreal statevec_calcProbOfOutcome(Qureg qureg, const int measureQubit, int outcome)
 {
   // stage 1 done! optimize statevec_findProbabilityOfZeroDistributed!
+  // cuMPI done!
   //~~!!need to compare to gpu_local & cpu_local~~
 
-  qreal stateProb=0, totalStateProb=0;
+  // qreal stateProb=0, totalStateProb=0;
+  qreal *stateProb = mallocZeroRealInDevice(sizeof(qreal));
+  qreal *totalStateProb = mallocZeroRealInDevice(sizeof(qreal));
+
   int skipValuesWithinRank = halfMatrixBlockFitsInChunk(qureg.numAmpsPerChunk, measureQubit);
   if (skipValuesWithinRank) {
-    stateProb = statevec_findProbabilityOfZeroLocal(qureg, measureQubit);
+    qreal h_tmp = statevec_findProbabilityOfZeroLocal(qureg, measureQubit);
+    setRealInDevice(stateProb, h_tmp);
   } else {
     if (!isChunkToSkipInFindPZero(qureg.chunkId, qureg.numAmpsPerChunk, measureQubit)){
-      stateProb = statevec_findProbabilityOfZeroDistributed(qureg);
-    } else stateProb = 0;
+      qreal h_tmp = statevec_findProbabilityOfZeroDistributed(qureg);
+      setRealInDevice(stateProb, h_tmp);
+    } else {
+      // stateProb = 0;
+    }
   }
-  cuMPI_Allreduce(&stateProb, &totalStateProb, 1, cuMPI_QuEST_REAL, cuMPI_SUM, cuMPI_COMM_WORLD);
-  if (outcome==1) totalStateProb = 1.0 - totalStateProb;
-  return totalStateProb;
+  cuMPI_Allreduce(stateProb, totalStateProb, 1, cuMPI_QuEST_REAL, cuMPI_SUM, cuMPI_COMM_WORLD);
+
+  int h_totalStateProb = getRealInDevice(totalStateProb);
+  freeRealInDevice(stateProb);
+  freeRealInDevice(totalStateProb);
+  if (outcome==1) h_totalStateProb = 1.0 - h_totalStateProb;
+  return h_totalStateProb;
 }
 
 void statevec_collapseToKnownProbOutcome(Qureg qureg, const int measureQubit, int outcome, qreal totalStateProb)
@@ -1445,11 +1524,12 @@ void statevec_collapseToKnownProbOutcome(Qureg qureg, const int measureQubit, in
 
 void seedQuESTDefault(){
   // stage 1 done!
+  // cuMPI done!
 
   //!!cpu_local is similar to gpu_local
 
   // init MT random number generator with three keys -- time and pid
-  // for the MPI version, it is ok that all procs will get the same seed as random numbers will only be
+  // for the cuMPI version, it is ok that all procs will get the same seed as random numbers will only be
   // used by the master process
 
   unsigned long int key[2];
@@ -1457,7 +1537,11 @@ void seedQuESTDefault(){
   // this seed will be used to generate the same random number on all procs,
   // therefore we want to make sure all procs receive the same key
   // using cuMPI_UNSIGNED_LONG
-  cuMPI_Bcast(key, 2, cuMPI_UINT32_T, 0, cuMPI_COMM_WORLD);
+
+  unsigned long int *d_key = (unsigned long int *)mallocZeroVarInDevice(2 * sizeof(unsigned long int));
+  setVarInDevice(d_key, key, 2 * sizeof(unsigned long int));
+  cuMPI_Bcast(d_key, 2, cuMPI_UINT32_T, 0, cuMPI_COMM_WORLD);
+  freeRealInDevice(d_key);
   init_by_array(key, 2);
 }
 
@@ -1592,7 +1676,7 @@ void statevec_swapQubitAmps(Qureg qureg, int qb1, int qb2) {
   // perform swaps as necessary
   for (int t=0; t<numTargs; t++)
       if (swapTargs[t] != targs[t])
-          statevec_swapQubitAmps(qureg, targs[t], swapTargs[t]);
+          statevec_swapQubitAmpsLocal(qureg, targs[t], swapTargs[t]);
 
   // all target qubits have now been swapped into local memory
   statevec_multiControlledMultiQubitUnitaryLocal(qureg, ctrlMask, swapTargs, numTargs, u);
@@ -1600,7 +1684,7 @@ void statevec_swapQubitAmps(Qureg qureg, int qb1, int qb2) {
   // undo swaps
   for (int t=0; t<numTargs; t++)
       if (swapTargs[t] != targs[t])
-          statevec_swapQubitAmps(qureg, targs[t], swapTargs[t]);
+          statevec_swapQubitAmpsLocal(qureg, targs[t], swapTargs[t]);
 }
 
 
@@ -1955,31 +2039,6 @@ void statevec_reportStateToScreen(Qureg qureg, QuESTEnv env, int reportRank){
           syncQuESTEnv(env);
       }
   } else printf("Error: reportStateToScreen will not print output for systems of more than 5 qubits.\n");
-}
-
-
-qreal statevec_getRealAmp(Qureg qureg, long long int index){
-  // stage 1 done!
-
-  int chunkId = getChunkIdFromIndex(qureg, index);
-  qreal el; 
-  if (qureg.chunkId==chunkId){
-      el = statevec_getRealAmpLocal(index-chunkId*qureg.numAmpsPerChunk);
-  }
-  cuMPI_Bcast(&el, 1, cuMPI_QuEST_REAL, chunkId, cuMPI_COMM_WORLD);
-  return el; 
-} 
-
-qreal statevec_getImagAmp(Qureg qureg, long long int index){
-  // stage 1 done!
-
-  int chunkId = getChunkIdFromIndex(qureg, index);
-  qreal el; 
-  if (qureg.chunkId==chunkId){
-      el = statevec_getImagAmpLocal(index-chunkId*qureg.numAmpsPerChunk);
-  }
-  cuMPI_Bcast(&el, 1, cuMPI_QuEST_REAL, chunkId, cuMPI_COMM_WORLD);
-  return el; 
 }
 
 __global__ void statevec_initPlusStateKernel(

@@ -146,6 +146,8 @@ __global__ void statevec_compactUnitaryKernel (Qureg qureg, const int rotQubit, 
 
 void statevec_compactUnitaryLocal(Qureg qureg, const int targetQubit, Complex alpha, Complex beta) 
 {
+    // stage 1 done!
+
     int threadsPerCUDABlock, CUDABlocks;
     threadsPerCUDABlock = 128;
     CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);
@@ -213,6 +215,8 @@ __global__ void statevec_controlledCompactUnitaryKernel (Qureg qureg, const int 
 
 void statevec_controlledCompactUnitaryLocal(Qureg qureg, const int controlQubit, const int targetQubit, Complex alpha, Complex beta) 
 {
+    // stage 1 done!
+
     int threadsPerCUDABlock, CUDABlocks;
     threadsPerCUDABlock = 128;
     CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);
@@ -274,6 +278,8 @@ __global__ void statevec_unitaryKernel(Qureg qureg, const int targetQubit, ArgMa
 
 void statevec_unitaryLocal(Qureg qureg, const int targetQubit, ComplexMatrix2 u)
 {
+    // stage 1 done!
+
     int threadsPerCUDABlock, CUDABlocks;
     threadsPerCUDABlock = 128;
     CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);
@@ -539,6 +545,8 @@ __global__ void statevec_controlledUnitaryKernel(Qureg qureg, const int controlQ
 
 void statevec_controlledUnitaryLocal(Qureg qureg, const int controlQubit, const int targetQubit, ComplexMatrix2 u)
 {
+    // stage 1 done!
+
     int threadsPerCUDABlock, CUDABlocks;
     threadsPerCUDABlock = 128;
     CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);
@@ -610,6 +618,7 @@ void statevec_multiControlledUnitaryLocal(
     long long int ctrlQubitsMask, long long int ctrlFlipMask, 
     const int targetQubit, ComplexMatrix2 u
 ){
+    // stage 1 done!
     int threadsPerCUDABlock = 128;
     int CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);
     statevec_multiControlledUnitaryKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
@@ -1334,7 +1343,7 @@ Complex statevec_calcInnerProductLocal(Qureg bra, Qureg ket) {
         }
         sharedMemSize = valuesPerCUDABlock*sizeof(qreal);
         if (firstTime) {
-             statevec_calcInnerProductKernel<<<numCUDABlocks, valuesPerCUDABlock, sharedMemSize, mpi4cudaGetCurrentStream()>>>(
+             statevec_calcInnerProductKernel<<<numCUDABlocks, valuesPerCUDABlock, sharedMemSize)>>>(
                  getRealComp,
                  bra.stateVec.real, bra.stateVec.imag, 
                  ket.stateVec.real, ket.stateVec.imag, 
@@ -1343,7 +1352,7 @@ Complex statevec_calcInnerProductLocal(Qureg bra, Qureg ket) {
             firstTime = 0;
         } else {
             cudaDeviceSynchronize();    
-            copySharedReduceBlock<<<numCUDABlocks, valuesPerCUDABlock/2, sharedMemSize, mpi4cudaGetCurrentStream()>>>(
+            copySharedReduceBlock<<<numCUDABlocks, valuesPerCUDABlock/2, sharedMemSize>>>(
                     bra.firstLevelReduction, 
                     bra.secondLevelReduction, valuesPerCUDABlock); 
             cudaDeviceSynchronize();    
@@ -1369,7 +1378,7 @@ Complex statevec_calcInnerProductLocal(Qureg bra, Qureg ket) {
         }
         sharedMemSize = valuesPerCUDABlock*sizeof(qreal);
         if (firstTime) {
-             statevec_calcInnerProductKernel<<<numCUDABlocks, valuesPerCUDABlock, sharedMemSize, mpi4cudaGetCurrentStream()>>>(
+             statevec_calcInnerProductKernel<<<numCUDABlocks, valuesPerCUDABlock, sharedMemSize>>>(
                  getRealComp,
                  bra.stateVec.real, bra.stateVec.imag, 
                  ket.stateVec.real, ket.stateVec.imag, 
@@ -1378,7 +1387,7 @@ Complex statevec_calcInnerProductLocal(Qureg bra, Qureg ket) {
             firstTime = 0;
         } else {
             cudaDeviceSynchronize();    
-            copySharedReduceBlock<<<numCUDABlocks, valuesPerCUDABlock/2, sharedMemSize, mpi4cudaGetCurrentStream()>>>(
+            copySharedReduceBlock<<<numCUDABlocks, valuesPerCUDABlock/2, sharedMemSize>>>(
                     bra.firstLevelReduction, 
                     bra.secondLevelReduction, valuesPerCUDABlock); 
             cudaDeviceSynchronize();    

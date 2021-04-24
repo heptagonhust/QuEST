@@ -28,7 +28,7 @@
 # if QuEST_PREC==1
     # define qreal float
     // \cond HIDDEN_SYMBOLS   
-    # define MPI_QuEST_REAL MPI_FLOAT
+    # define MPI_QuEST_REAL cuMPI_FLOAT
     # define MPI_MAX_AMPS_IN_MSG (1LL<<29) // must be 2^int
     # define REAL_STRING_FORMAT "%.8f"
     # define REAL_QASM_FORMAT "%.8g"
@@ -41,7 +41,7 @@
 # elif QuEST_PREC==2
     # define qreal double
     // \cond HIDDEN_SYMBOLS   
-    # define MPI_QuEST_REAL MPI_DOUBLE
+    # define MPI_QuEST_REAL cuMPI_DOUBLE
     # define MPI_MAX_AMPS_IN_MSG (1LL<<28) // must be 2^int
     # define REAL_STRING_FORMAT "%.14f"
     # define REAL_QASM_FORMAT "%.14g"
@@ -55,7 +55,7 @@
 # elif QuEST_PREC==4
     # define qreal long double
     // \cond HIDDEN_SYMBOLS   
-    # define MPI_QuEST_REAL MPI_LONG_DOUBLE
+    # define MPI_QuEST_REAL cuMPI_LONG_DOUBLE
     # define MPI_MAX_AMPS_IN_MSG (1LL<<27) // must be 2^int
     # define REAL_STRING_FORMAT "%.17Lf"
     # define REAL_QASM_FORMAT "%.17Lg"
