@@ -21,10 +21,6 @@ char hostname[1024];        // host name for identification in cuMPI
 //cuMPI_Brcast
 //cuMPI_SendRecv
 
-void copyStateFromCurrentGPU(Qureg qureg){
-  copyStateFromGPU(qureg);
-}
-
 Complex statevec_calcInnerProduct(Qureg bra, Qureg ket) {
   // stage 1 done! (mode 1)
   // cuMPI done!
