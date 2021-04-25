@@ -1495,7 +1495,7 @@ qreal statevec_calcProbOfOutcome(Qureg qureg, const int measureQubit, int outcom
   }
   cuMPI_Allreduce(stateProb, totalStateProb, 1, cuMPI_QuEST_REAL, cuMPI_SUM, cuMPI_COMM_WORLD);
 
-  int h_totalStateProb = getRealInDevice(totalStateProb);
+  qreal h_totalStateProb = getRealInDevice(totalStateProb);
   freeRealInDevice(stateProb);
   freeRealInDevice(totalStateProb);
   if (outcome==1) h_totalStateProb = 1.0 - h_totalStateProb;

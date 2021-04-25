@@ -231,7 +231,7 @@ int main(int narg, char *argv[]) {
   }
 
   printf("\n");
-  //while(1);
+  // while(1);
   destroyQureg(q, Env);
   destroyQuESTEnv(Env);
 
