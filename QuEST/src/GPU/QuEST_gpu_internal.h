@@ -1,6 +1,10 @@
 #ifndef _QUEST_GPU_H_
 #define _QUEST_GPU_H_
 
+#include <thrust/transform_reduce.h>
+#include <thrust/functional.h>
+#include <thrust/device_vector.h>
+
 #include <assert.h>
 
 // Distributed under MIT licence. See https://github.com/QuEST-Kit/QuEST/blob/master/LICENCE.txt for details

@@ -1410,24 +1410,35 @@ void statevec_hadamard(Qureg qureg, const int targetQubit)
   }
 }
 
-__global__ void statevec_findProbabilityOfZeroDistributedKernel (
-  const long long int chunkSize,
-  qreal *stateVecReal,
-  qreal *stateVecImag,
-  qreal *totalProbability // ----- measured probability
-) {
-  // ----- temp variables
-  long long int thisTask = blockIdx.x*blockDim.x + threadIdx.x; // task based approach for expose loop with small granularity
-  const long long int numTasks = chunkSize;
-  if (thisTask>=numTasks) return;
+struct calcProb{
+  const qreal *_stateVecReal;
+  const qreal *_stateVecImag;
+  calcProb(qreal *stateVecReal, qreal *stateVecImag) : _stateVecReal(stateVecReal), _stateVecImag(stateVecImag) { }
+  __host__ __device__        
+  qreal operator()(const int& idx) const { 
+    return _stateVecReal[idx] * _stateVecReal[idx] +
+           _stateVecImag[idx] * _stateVecImag[idx];
+  }
+};
 
-  // ---------------------------------------------------------------- //
-  //            find probability                                      //
-  // ---------------------------------------------------------------- //
+// __global__ void statevec_findProbabilityOfZeroDistributedKernel (
+//   const long long int chunkSize,
+//   qreal *stateVecReal,
+//   qreal *stateVecImag,
+//   qreal *totalProbability // ----- measured probability
+// ) {
+//   // ----- temp variables
+//   long long int thisTask = blockIdx.x*blockDim.x + threadIdx.x; // task based approach for expose loop with small granularity
+//   const long long int numTasks = chunkSize;
+//   if (thisTask>=numTasks) return;
 
-  atomicAdd(totalProbability, stateVecReal[thisTask]*stateVecReal[thisTask]
-          + stateVecImag[thisTask]*stateVecImag[thisTask]);
-}
+//   // ---------------------------------------------------------------- //
+//   //            find probability                                      //
+//   // ---------------------------------------------------------------- //
+
+//   atomicAdd(totalProbability, stateVecReal[thisTask]*stateVecReal[thisTask]
+//           + stateVecImag[thisTask]*stateVecImag[thisTask]);
+// }
 
 /** Measure the probability of a specified qubit being in the zero state across all amplitudes held in this chunk.
  * Size of regions to skip is a multiple of chunkSize.
@@ -1439,15 +1450,22 @@ __global__ void statevec_findProbabilityOfZeroDistributedKernel (
  qreal statevec_findProbabilityOfZeroDistributed (Qureg qureg) {
   // stage 1 done!
   qreal totalProbability = 0.0;
-  int threadsPerCUDABlock, CUDABlocks;
-  threadsPerCUDABlock = 128;
-  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
-  statevec_findProbabilityOfZeroDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
-    qureg.numAmpsPerChunk,
-    qureg.stateVec.real,
-    qureg.stateVec.imag,
-    &totalProbability
-  );
+  // int threadsPerCUDABlock, CUDABlocks;
+  // threadsPerCUDABlock = 128;
+  // CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
+  // statevec_findProbabilityOfZeroDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
+  //   qureg.numAmpsPerChunk,
+  //   qureg.stateVec.real,
+  //   qureg.stateVec.imag,
+  //   &totalProbability
+  // );
+
+  thrust::device_vector<int> d_idx(qureg.numAmpsPerChunk);
+  thrust::sequence(d_idx.begin(), d_idx.end());
+  calcProb unary_op(qureg.stateVec.real, qureg.stateVec.imag);
+  thrust::plus<qreal> binary_op;
+  qreal init = 0.0;
+  totalProbability = thrust::transform_reduce(d_idx.begin(), d_idx.end(), unary_op, init, binary_op);
   return totalProbability;
 }
 
@@ -1483,10 +1501,12 @@ qreal statevec_calcProbOfOutcome(Qureg qureg, const int measureQubit, int outcom
 
   int skipValuesWithinRank = halfMatrixBlockFitsInChunk(qureg.numAmpsPerChunk, measureQubit);
   if (skipValuesWithinRank) {
+    // printf("in 1486 no\n");
     qreal h_tmp = statevec_findProbabilityOfZeroLocal(qureg, measureQubit);
     setRealInDevice(stateProb, &h_tmp);
   } else {
     if (!isChunkToSkipInFindPZero(qureg.chunkId, qureg.numAmpsPerChunk, measureQubit)){
+      printf("in 1490\n");
       qreal h_tmp = statevec_findProbabilityOfZeroDistributed(qureg);
       setRealInDevice(stateProb, &h_tmp);
     } else {
