@@ -1,4 +1,4 @@
-#include "QuEST_gpu.h"
+#include "QuEST_gpu_internal.h"
 
 /*
  * state vector and density matrix operations 
@@ -649,7 +649,7 @@ __global__ void statevec_pauliXKernel(Qureg qureg, const int targetQubit){
 
     //! fix -- no necessary for GPU version
     qreal *stateVecReal = qureg.stateVec.real;
-    qreal *stateVecImag = qureg.dstateVec.imag;
+    qreal *stateVecImag = qureg.stateVec.imag;
 
     thisTask = blockIdx.x*blockDim.x + threadIdx.x;
     if (thisTask>=numTasks) return;
@@ -1343,7 +1343,7 @@ Complex statevec_calcInnerProductLocal(Qureg bra, Qureg ket) {
         }
         sharedMemSize = valuesPerCUDABlock*sizeof(qreal);
         if (firstTime) {
-             statevec_calcInnerProductKernel<<<numCUDABlocks, valuesPerCUDABlock, sharedMemSize)>>>(
+             statevec_calcInnerProductKernel<<<numCUDABlocks, valuesPerCUDABlock, sharedMemSize>>>(
                  getRealComp,
                  bra.stateVec.real, bra.stateVec.imag, 
                  ket.stateVec.real, ket.stateVec.imag, 

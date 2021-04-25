@@ -1115,6 +1115,7 @@ qreal densmatr_calcTotalProb(Qureg qureg) {
 // from double GPU, after copyVecIntoMatrixPairState()
 /********************************************/
 
+// !!!!!!!! already have this function before in this file
 qreal densmatr_calcFidelity(Qureg qureg, Qureg pureState) {
   // phase 1 undone!!!!!!!!
   // concern about cpu_local version +yh
@@ -1161,6 +1162,7 @@ qreal densmatr_calcInnerProduct(Qureg a, Qureg b) {
   return dist;
 }
 
+// !!!!!!!! already have this function before in this file
 void densmatr_initPureState(Qureg targetQureg, Qureg copyQureg) {
   // phase 1 undone!!!!!!!!
   // similar to densmatr_calcFidelity.
@@ -1385,7 +1387,7 @@ void densmatr_mixDampingDistributed(Qureg qureg, const int targetQubit, qreal da
 
 
 
-
+// !!!!!!!! already have this function before in this file
 void densmatr_mixDepolarising(Qureg qureg, const int targetQubit, qreal depolLevel) {
   // !!need compare to distributed cpu version
   // !!local cpu version is below:
@@ -1420,6 +1422,7 @@ void densmatr_mixDepolarising(Qureg qureg, const int targetQubit, qreal depolLev
 
 }
 
+// !!!!!!!! already have this function before in this file
 void densmatr_mixDamping(Qureg qureg, const int targetQubit, qreal damping) {
   // !!need compare to distributed cpu version
   // !!local cpu version is below:
@@ -1453,6 +1456,7 @@ void densmatr_mixDamping(Qureg qureg, const int targetQubit, qreal damping) {
 
 }
 
+// !!!!!!!! already have this function before in this file
 void densmatr_mixTwoQubitDepolarising(Qureg qureg, int qubit1, int qubit2, qreal depolLevel){
   // !!need compare to distributed cpu version
   // !!concern about local cpu version
@@ -1552,7 +1556,7 @@ void densmatr_mixTwoQubitDepolarising(Qureg qureg, int qubit1, int qubit2, qreal
 
 // From double GPU, after statevec_calcProbOfOutcome()
 
-
+// !!!!!!!! already have this function before in this file
 qreal densmatr_calcProbOfOutcome(Qureg qureg, const int measureQubit, int outcome) {
 
   //!!need to compare to gpu_local & cpu_local
@@ -1567,6 +1571,7 @@ qreal densmatr_calcProbOfOutcome(Qureg qureg, const int measureQubit, int outcom
 	return outcomeProb;
 }
 
+// !!!!!!!! already have this function before in this file
 qreal densmatr_calcPurity(Qureg qureg) {
 
   //!!simple return in cpu_local
@@ -1586,3 +1591,11 @@ qreal densmatr_calcPurity(Qureg qureg) {
 //densmatr_oneQubitDegradeOffDiagonal(qureg, targetQubit, dephase);
 //densmatr_mixTwoQubitDephasing(qureg, qubit1, qubit2, depolLevel);
 
+
+
+
+// qreal densmatr_calcTotalProbLocal(Qureg qureg) {}
+// qreal densmatr_calcTotalProb(Qureg qureg) {}
+
+// qreal densmatr_calcInnerProduct(Qureg a, Qureg b) {}
+// qreal densmatr_calcInnerProductLocal(Qureg a, Qureg b) {}

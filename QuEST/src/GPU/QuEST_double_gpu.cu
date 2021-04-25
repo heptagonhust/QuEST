@@ -1,4 +1,4 @@
-#include "QuEST_gpu.h"
+#include "QuEST_gpu_internal.h"
 #include "cuMPI/src/cuMPI_runtime.h"
 
 /********************** For cuMPI environment **********************/
@@ -20,6 +20,10 @@ char hostname[1024];        // host name for identification in cuMPI
 //cuMPI_Allreduce
 //cuMPI_Brcast
 //cuMPI_SendRecv
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 Complex statevec_calcInnerProduct(Qureg bra, Qureg ket) {
   // stage 1 done! (mode 1)
@@ -89,7 +93,7 @@ __global__ void statevec_calcTotalProbDistributedKernel (
   }
 }
 
-qreal statevec_calcTotalProbDistributed(Qureg qureg){
+qreal statevec_calcTotalProb(Qureg qureg){
   // stage 1 done! fixed cuMPI device memory.
   // cuMPI done!
 
@@ -125,7 +129,7 @@ static int getChunkOuterBlockPairId(int chunkIsUpper, int chunkId, long long int
 static int halfMatrixBlockFitsInChunk(long long int chunkSize, int targetQubit);
 static int getChunkIdFromIndex(Qureg qureg, long long int index);
 
-int getChunkIdFromIndex(Qureg qureg, long long int index){
+static int getChunkIdFromIndex(Qureg qureg, long long int index){
   return index/qureg.numAmpsPerChunk; // this is numAmpsPerChunk
 }
 
@@ -183,8 +187,8 @@ QuESTEnv createQuESTEnv(void) {
     // ensure env is initialised anyway, so the compiler is happy
     // cuMPI_Comm_size(cuMPI_COMM_WORLD, &numRanks);
     // cuMPI_Comm_rank(cuMPI_COMM_WORLD, &rank);
-    env.rank=rank;
-    env.numRanks=numRanks;
+    env.rank=myRank;
+    env.numRanks=nRanks;
 
   }
 
@@ -712,6 +716,7 @@ void statevec_unitary(Qureg qureg, const int targetQubit, ComplexMatrix2 u)
 
 __global__ void statevec_controlledCompactUnitaryDistributedKernel (
   const long long int chunkSize,
+  const long long int chunkId,
   const int controlQubit,
   Complex rot1, Complex rot2,
   ComplexArray deviceStateVecUp,
@@ -725,7 +730,7 @@ __global__ void statevec_controlledCompactUnitaryDistributedKernel (
   if (thisTask>=numTasks) return;
 
   // const long long int chunkSize=qureg.numAmpsPerChunk;
-  const long long int chunkId=qureg.chunkId;
+  // const long long int chunkId=qureg.chunkId;
 
   qreal rot1Real=rot1.real, rot1Imag=rot1.imag;
   qreal rot2Real=rot2.real, rot2Imag=rot2.imag;
@@ -771,8 +776,9 @@ __global__ void statevec_controlledCompactUnitaryDistributedKernel (
   threadsPerCUDABlock = 128;
   CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
   statevec_controlledCompactUnitaryDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
-    qureg.numAmpsPerChunk, 
-    controlQubit, 
+    qureg.numAmpsPerChunk,
+    qureg.chunkId,
+    controlQubit,
     rot1,
     rot2, 
     stateVecUp, 
@@ -1137,7 +1143,7 @@ void statevec_pauliY(Qureg qureg, const int targetQubit)
     int pairRank; 		// rank of corresponding chunk
 
     if (useLocalDataOnly){
-        statevec_pauliYLocal(qureg, targetQubit, conjFac);
+        statevec_pauliYLocal(qureg, targetQubit); // local gpu version separated pauliY & pauliYConj
     } else {
         // need to get corresponding chunk of state vector from other rank
         rankIsUpper = chunkIsUpper(qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);
@@ -1167,7 +1173,7 @@ void statevec_pauliYConj(Qureg qureg, const int targetQubit)
   int pairRank; 		// rank of corresponding chunk
 
   if (useLocalDataOnly){
-    statevec_pauliYLocal(qureg, targetQubit, conjFac);
+    statevec_pauliYConjLocal(qureg, targetQubit); // local gpu version separated pauliY & pauliYConj
   } else {
     // need to get corresponding chunk of state vector from other rank
     rankIsUpper = chunkIsUpper(qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);
@@ -1321,7 +1327,7 @@ __global__ void statevec_hadamardDistributedKernel(
   if (updateUpper) sign=1;
   else sign=-1;
 
-  qreal recRoot2 = 1.0/sqrt(2);
+  qreal recRoot2 = 1.0/sqrt(2.0);
 
   qreal *stateVecRealUp=deviceStateVecUp.real, *stateVecImagUp=deviceStateVecUp.imag;
   qreal *stateVecRealLo=deviceStateVecLo.real, *stateVecImagLo=deviceStateVecLo.imag;
@@ -1404,7 +1410,7 @@ void statevec_hadamard(Qureg qureg, const int targetQubit)
   }
 }
 
-__global__ void statevec_findProbabilityOfZeroDistributed (
+__global__ void statevec_findProbabilityOfZeroDistributedKernel (
   const long long int chunkSize,
   qreal *stateVecReal,
   qreal *stateVecImag,
@@ -1478,11 +1484,11 @@ qreal statevec_calcProbOfOutcome(Qureg qureg, const int measureQubit, int outcom
   int skipValuesWithinRank = halfMatrixBlockFitsInChunk(qureg.numAmpsPerChunk, measureQubit);
   if (skipValuesWithinRank) {
     qreal h_tmp = statevec_findProbabilityOfZeroLocal(qureg, measureQubit);
-    setRealInDevice(stateProb, h_tmp);
+    setRealInDevice(stateProb, &h_tmp);
   } else {
     if (!isChunkToSkipInFindPZero(qureg.chunkId, qureg.numAmpsPerChunk, measureQubit)){
       qreal h_tmp = statevec_findProbabilityOfZeroDistributed(qureg);
-      setRealInDevice(stateProb, h_tmp);
+      setRealInDevice(stateProb, &h_tmp);
     } else {
       // stateProb = 0;
     }
@@ -1537,7 +1543,7 @@ void seedQuESTDefault(){
   unsigned long int *d_key = (unsigned long int *)mallocZeroVarInDevice(2 * sizeof(unsigned long int));
   setVarInDevice(d_key, key, 2 * sizeof(unsigned long int));
   cuMPI_Bcast(d_key, 2, cuMPI_UINT32_T, 0, cuMPI_COMM_WORLD);
-  freeRealInDevice(d_key);
+  freeVarInDevice(d_key);
   init_by_array(key, 2);
 }
 
@@ -1705,11 +1711,11 @@ void statevec_createQureg(Qureg *qureg, int numQubits, QuESTEnv env)
     //     qureg->pairStateVec.imag = (qreal*) malloc(numAmpsPerRank * sizeof(*(qureg->pairStateVec.imag)));
     // }
 
-    cudaMalloc(&(qureg->stateVec.real), numAmpsPerRank * sizeof(*(qureg->stateVec.real));
-    cudaMalloc(&(qureg->stateVec.imag), numAmpsPerRank * sizeof(*(qureg->stateVec.imag));
+    cudaMalloc(&(qureg->stateVec.real), numAmpsPerRank * sizeof(*(qureg->stateVec.real)));
+    cudaMalloc(&(qureg->stateVec.imag), numAmpsPerRank * sizeof(*(qureg->stateVec.imag)));
     if (env.numRanks > 1) {
-      cudaMalloc(&(qureg->stateVec.real), numAmpsPerRank * sizeof(*(qureg->pairStateVec.real)));
-      cudaMalloc(&(qureg->stateVec.imag), numAmpsPerRank * sizeof(*(qureg->pairStateVec.imag));
+      cudaMalloc(&(qureg->pairStateVec.real), numAmpsPerRank * sizeof(*(qureg->pairStateVec.real)));
+      cudaMalloc(&(qureg->pairStateVec.imag), numAmpsPerRank * sizeof(*(qureg->pairStateVec.imag)));
     }
 
     // check gpu memory allocation was successful
@@ -1926,7 +1932,7 @@ void statevec_setAmps(Qureg qureg, long long int startInd, qreal* reals, qreal* 
   // they may now be out of order = no iterations
 
   // unpacking OpenMP vars
-  long long int index;
+  // long long int index;
   qreal* vecRe = qureg.stateVec.real;
   qreal* vecIm = qureg.stateVec.imag;
 
@@ -2058,7 +2064,7 @@ void statevec_initPlusState(Qureg qureg)
   // stage 1 done!
   
   long long int chunkSize, stateVecSize;
-  long long int index;
+  // long long int index;
 
   // dimension of the state vector
   chunkSize = qureg.numAmpsPerChunk;
@@ -2080,7 +2086,7 @@ __global__ void statevec_initClassicalStateKernel(
   long long int stateVecSize, 
   qreal *stateVecReal, 
   qreal *stateVecImag, 
-  long long int stateInd,
+  long long int stateInd
 ){
   long long int index;
 
@@ -2113,14 +2119,19 @@ void statevec_initClassicalState(Qureg qureg, long long int stateInd)
           stateVecSize, 
           qureg.stateVec.real, 
           qureg.stateVec.imag,
-          stateInd % stateVecSize, 
+          stateInd % stateVecSize
       );
   } else {
       statevec_initClassicalStateKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
           stateVecSize, 
           qureg.stateVec.real, 
           qureg.stateVec.imag,
-          stateVecSize, // chunkId not match, so index==stateInd(=stateVecSize) will always be 0
+          stateVecSize // chunkId not match, so index==stateInd(=stateVecSize) will always be 0
       );
   }
 }
+
+
+#ifdef __cplusplus
+}
+#endif

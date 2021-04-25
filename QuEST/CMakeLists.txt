@@ -275,7 +275,6 @@ add_subdirectory(src)
 if (GPUACCELERATED)
     cuda_add_library(QuEST SHARED
         ${QuEST_SRC}
-        /libcuMPI.so
     )
 elseif (WIN32)
     add_library(QuEST STATIC
@@ -313,6 +312,6 @@ target_link_libraries(QuEST ${MPI_C_LIBRARIES})
 # ----- GPU -------------------------------------------------------------------
 
 target_link_libraries(QuEST ${CUDA_LIBRARIES})
-
+target_link_libraries(QuEST /lib64/libcuMPI.so)
 
 
