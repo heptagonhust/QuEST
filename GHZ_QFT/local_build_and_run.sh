@@ -5,6 +5,6 @@ mkdir build
 cd build
 cmake ../../ -DGPUACCELERATED=ON -DMULTITHREADED=OFF
 make -j6
-mpirun -np 2./qft
+mpirun -np 2 ./qft
 diff probs.dat ../../examples/probs.dat_GHZ
 diff stateVector.dat ../../examples/stateVector.dat_GHZ

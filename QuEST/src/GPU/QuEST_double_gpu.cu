@@ -1072,7 +1072,11 @@ void statevec_controlledNot(Qureg qureg, const int controlQubit, const int targe
               qureg.pairStateVec, //in
               qureg.stateVec); //out
     }
+  // displayDeviceVarOnHost(qureg.stateVec.real, (qureg.stateVec.real + qureg.numAmpsPerChunk));
+
   }
+  // displayDeviceVarOnHost(qureg.stateVec.real, (qureg.stateVec.real + qureg.numAmpsPerChunk));
+
 }
 
 __global__ void statevec_pauliYDistributedKernel(
@@ -1408,6 +1412,7 @@ void statevec_hadamard(Qureg qureg, const int targetQubit)
               qureg.stateVec, rankIsUpper); //output
     }
   }
+  // displayDeviceVarOnHost(qureg.stateVec.real, (qureg.stateVec.real + qureg.numAmpsPerChunk));
 }
 
 struct calcProb{

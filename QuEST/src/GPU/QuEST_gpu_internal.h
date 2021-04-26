@@ -222,6 +222,16 @@ inline int isReadyOnGPU(Qureg qureg) {
   return 1;
 }
 
+template <typename T>
+inline void displayDeviceVarOnHost(T *ptr_begin, T *ptr_end) {
+  thrust::device_ptr<T> dev_ptr_begin = thrust::device_pointer_cast(ptr_begin);
+  thrust::device_ptr<T> dev_ptr_end = thrust::device_pointer_cast(ptr_end);
+  thrust::device_vector<T> d_x(dev_ptr_begin, dev_ptr_end);
+  for(int i = 0; i < d_x.size(); i++)
+    std::cout << (T)d_x[i] << " ";
+  std::cout << std::endl;
+}
+
 
 /* Functions from QuEST_gpu_local.cu */
 
