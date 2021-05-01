@@ -106,3 +106,6 @@ out/
 build-*/
 random/demo
 examples/compile_flags.txt
+latex
+.ccls-cache
+html
