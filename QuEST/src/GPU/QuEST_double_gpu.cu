@@ -1511,7 +1511,7 @@ qreal statevec_calcProbOfOutcome(Qureg qureg, const int measureQubit, int outcom
     setRealInDevice(stateProb, &h_tmp);
   } else {
     if (!isChunkToSkipInFindPZero(qureg.chunkId, qureg.numAmpsPerChunk, measureQubit)){
-      printf("in 1490\n");
+      // printf("in 1490\n");
       qreal h_tmp = statevec_findProbabilityOfZeroDistributed(qureg);
       setRealInDevice(stateProb, &h_tmp);
     } else {
