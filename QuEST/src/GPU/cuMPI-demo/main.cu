@@ -6,7 +6,7 @@ int localRank;              // CUDA device ID
 
 ncclUniqueId id;            // NCCL Unique ID
 cuMPI_Comm comm;            // cuMPI comm
-cudaStream_t defaultStream; // CUDA stream generated for each GPU
+cudaStream_t commStream; // CUDA stream generated for each GPU
 uint64_t hostHashs[10];     // host name hash in cuMPI
 char hostname[1024];        // host name for identification in cuMPI
 

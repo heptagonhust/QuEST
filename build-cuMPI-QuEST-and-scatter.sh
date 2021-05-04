@@ -11,7 +11,11 @@ cmake -DNCCL_LIBRARY=/lib64/libnccl.so \
       -DNCCL_INCLUDE_DIR=/usr/include/ \
       ..
 make -j16
-cp src/libcuMPI.so /lib64/libcuMPI.so
+if [[ "$?" -ne "0" ]]; then
+  cd /root/QuEST-experiments/QuEST
+  read 
+fi
+\cp -f src/libcuMPI.so /lib64/libcuMPI.so
 
 cd ../../../../..
 cd GHZ_QFT
@@ -22,8 +26,8 @@ mkdir build
 cd build
 cmake ../../ -DGPUACCELERATED=ON -DMULTITHREADED=OFF
 make -j16
-cp qft ~
-cp QuEST/libQuEST.so /lib64/libQuEST.so
+\cp -f qft ~
+\cp -f QuEST/libQuEST.so /lib64/libQuEST.so
 
 cd ../..
 cd random
@@ -34,9 +38,6 @@ mkdir build
 cd build
 cmake ../../ -DGPUACCELERATED=ON -DMULTITHREADED=OFF
 make -j16
-cp demo ~
+\cp -f demo ~
 
-scp /lib64/libcuMPI.so $TARGET_NODE:/lib64/libcuMPI.so
-scp /lib64/libQuEST.so $TARGET_NODE:/lib64/libQuEST.so
-scp ~/qft $TARGET_NODE:~
-scp ~/demo $TARGET_NODE:~
+cd ../../

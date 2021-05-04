@@ -8,11 +8,19 @@ set (PROJECT_NAME cuMPI-benchmark)
 
 project(${PROJECT_NAME})
 
+list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
+
 # Add custom include/ directory
 # set(COMMON_INCLUDES ${PROJECT_SOURCE_DIR}/include)
 # include_directories(${COMMON_INCLUDES})
 
 find_package(MPI REQUIRED)
+
+find_package(NCCL REQUIRED)
+if (NCCL_FOUND)
+  add_definitions(-DUSE_NCCL)
+  include_directories(SYSTEM ${NCCL_INCLUDE_DIR})
+endif ()
 
 find_package(CUDA REQUIRED)
 if (NOT CUDA_FOUND)
@@ -42,4 +50,5 @@ cuda_add_executable(
 target_link_libraries(
   ${PROJECT_NAME}
   /lib64/libcuMPI.so
+  ${NCCL_LIBRARY}
 )

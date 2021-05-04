@@ -2,15 +2,20 @@
 #include "cuMPI/src/cuMPI_runtime.h"
 
 /********************** For cuMPI environment **********************/
-int myRank;                 // cuMPI comm local ranks
-int nRanks;                 // total cuMPI comm ranks
-int localRank;              // CUDA device ID
+int myRank;                      // cuMPI comm local ranks
+int nRanks;                      // total cuMPI comm ranks
+int localRank;                   // CUDA device ID
 
-ncclUniqueId id;            // NCCL Unique ID
-cuMPI_Comm comm;            // cuMPI comm
-cudaStream_t defaultStream; // CUDA stream generated for each GPU
-uint64_t hostHashs[10];     // host name hash in cuMPI
-char hostname[1024];        // host name for identification in cuMPI
+ncclUniqueId id;                 // NCCL Unique ID
+cuMPI_Comm comm;                 // cuMPI comm
+cudaStream_t commStream;         // CUDA stream generated for each GPU
+cuMPI_Comm defaultComm;          // cuMPI comm
+cudaStream_t defaultCommStream;  // CUDA stream generated for each GPU
+uint64_t hostHashs[10];          // host name hash in cuMPI
+char hostname[1024];             // host name for identification in cuMPI
+
+std::map<cuMPI_Comm, cudaStream_t> comm2stream;
+
 #define cuMPI_COMM_WORLD comm
 #define cuMPI_QuEST_REAL MPI_QuEST_REAL
 #define cuMPI_MAX_AMPS_IN_MSG MPI_MAX_AMPS_IN_MSG
