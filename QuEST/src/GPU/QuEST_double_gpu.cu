@@ -18,7 +18,10 @@ std::map<cuMPI_Comm, cudaStream_t> comm2stream;
 
 #define cuMPI_COMM_WORLD comm
 #define cuMPI_QuEST_REAL MPI_QuEST_REAL
-#define cuMPI_MAX_AMPS_IN_MSG MPI_MAX_AMPS_IN_MSG
+// #define cuMPI_MAX_AMPS_IN_MSG MPI_MAX_AMPS_IN_MSG
+#define cuMPI_MAX_AMPS_IN_MSG (1LL<<28) // fine-tuned
+
+cuMPI_Comm pipeReal[1000], pipeImag[1000];
 /*******************************************************************/
 
 //cuMPI_Init
@@ -467,13 +470,22 @@ void exchangeStateVectors(Qureg qureg, int pairRank){
   // receive pairRank's state vector into qureg.pairStateVec
   for (i=0; i<numMessages; i++){
       offset = i*maxMessageCount;
+      cuMPI_CocurrentStart(pipeReal[i]);
       cuMPI_Sendrecv(&qureg.stateVec.real[offset], maxMessageCount, cuMPI_QuEST_REAL, pairRank, TAG,
               &qureg.pairStateVec.real[offset], maxMessageCount, cuMPI_QuEST_REAL,
-              pairRank, TAG, cuMPI_COMM_WORLD, &status);
+              pairRank, TAG, pipeReal[i], &status);
+      cuMPI_CocurrentEnd(pipeReal[i]);
       //printf("rank: %d err: %d\n", qureg.rank, err);
+      cuMPI_CocurrentStart(pipeImag[i]);
       cuMPI_Sendrecv(&qureg.stateVec.imag[offset], maxMessageCount, cuMPI_QuEST_REAL, pairRank, TAG,
               &qureg.pairStateVec.imag[offset], maxMessageCount, cuMPI_QuEST_REAL,
-              pairRank, TAG, cuMPI_COMM_WORLD, &status);
+              pairRank, TAG, pipeImag[i], &status);
+      cuMPI_CocurrentEnd(pipeImag[i]);
+  }
+
+  for (i=0; i<numMessages; i++) {
+    cudaStreamSynchronize(comm2stream[pipeReal[i]]);
+    cudaStreamSynchronize(comm2stream[pipeImag[i]]);
   }
 }
 
@@ -501,15 +513,24 @@ void exchangePairStateVectorHalves(Qureg qureg, int pairRank){
   // receive pairRank's state vector into the top of qureg.pairStateVec
   for (i=0; i<numMessages; i++){
       offset = i*maxMessageCount;
+      cuMPI_CocurrentStart(pipeReal[i]);
       cuMPI_Sendrecv(&qureg.pairStateVec.real[offset+numAmpsToSend], maxMessageCount,
               cuMPI_QuEST_REAL, pairRank, TAG,
               &qureg.pairStateVec.real[offset], maxMessageCount, cuMPI_QuEST_REAL,
-              pairRank, TAG, cuMPI_COMM_WORLD, &status);
+              pairRank, TAG, pipeReal[i], &status);
+      cuMPI_CocurrentEnd(pipeReal[i]);
+
       //printf("rank: %d err: %d\n", qureg.rank, err);
+      cuMPI_CocurrentStart(pipeImag[i]);
       cuMPI_Sendrecv(&qureg.pairStateVec.imag[offset+numAmpsToSend], maxMessageCount,
               cuMPI_QuEST_REAL, pairRank, TAG,
               &qureg.pairStateVec.imag[offset], maxMessageCount, cuMPI_QuEST_REAL,
-              pairRank, TAG, cuMPI_COMM_WORLD, &status);
+              pairRank, TAG, pipeImag[i], &status);
+      cuMPI_CocurrentEnd(pipeImag[i]);
+  }
+  for (i=0; i<numMessages; i++) {
+    cudaStreamSynchronize(comm2stream[pipeReal[i]]);
+    cudaStreamSynchronize(comm2stream[pipeImag[i]]);
   }
 }
 
@@ -1779,6 +1800,23 @@ void statevec_createQureg(Qureg *qureg, int numQubits, QuESTEnv env)
     //     printf("Could not allocate memory on GPU!\n");
     //     exit (EXIT_FAILURE);
     // }
+
+    // Multiple messages are required as cuMPI uses int rather than long long int for count
+    // For openmpi, messages are further restricted to 2GB in size -- do this for all cases
+    // to be safe
+    long long int maxMessageCount = cuMPI_MAX_AMPS_IN_MSG;
+    if (qureg->numAmpsPerChunk < maxMessageCount)
+        maxMessageCount = qureg->numAmpsPerChunk;
+
+    // safely assume cuMPI_MAX... = 2^n, so division always exact
+    int numMessages = qureg->numAmpsPerChunk/maxMessageCount;
+
+    int i;
+    for (i=0; i<numMessages; i++) {
+      cuMPI_NewGlobalComm(&pipeReal[i]);
+      cuMPI_NewGlobalComm(&pipeImag[i]);
+    }
+
 
 }
 

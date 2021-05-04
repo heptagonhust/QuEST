@@ -21,9 +21,9 @@ std::map<cuMPI_Comm, cudaStream_t> comm2stream;
 int main() {
   cuMPI_Init(NULL, NULL);
   
-  const int count = (1L << 29);
+  const int count = (1L << 24);
   const long long data_bytes = count * sizeof(float); // 4GB
-  const int max_times = 4; // 4GB * 2 * 3 = 24GB
+  const int max_times = 64; // 4GB * 2 * 3 = 24GB
 
   float *d_send[max_times] = {}, *d_recv[max_times] = {};
   for (int i = 0; i < max_times; ++i) {
@@ -34,21 +34,19 @@ int main() {
   cuMPI_Status status;
   int peer = 1 - myRank;
 
-  cuMPI_Comm realpipe, imagpipe;
-  cuMPI_NewGlobalComm(&realpipe);
-  cuMPI_NewGlobalComm(&imagpipe);
+  cuMPI_Comm pipe[max_times];
+  for (int i = 0; i < max_times; ++i) {
+    cuMPI_NewGlobalComm(&pipe[i]);
+  }
 
   toth::PreciseTimer timer;
   timer.start();
 
-  cuMPI_CocurrentStart(realpipe);
-  cuMPI_Sendrecv(d_send[0], count, cuMPI_FLOAT, peer, 0, d_recv[0], count, cuMPI_FLOAT, localRank, 0, realpipe, &status);
-  cuMPI_CocurrentEnd(realpipe);
-
-  cuMPI_CocurrentStart(imagpipe);
-  cuMPI_Sendrecv(d_send[1], count, cuMPI_FLOAT, peer, 0, d_recv[1], count, cuMPI_FLOAT, localRank, 0, imagpipe, &status);
-  cuMPI_CocurrentEnd(imagpipe);
-
+  for (int i = 0; i < max_times; ++i) {
+    cuMPI_CocurrentStart(pipe[i]);
+    cuMPI_Sendrecv(d_send[i], count, cuMPI_FLOAT, peer, 0, d_recv[i], count, cuMPI_FLOAT, localRank, 0, pipe[i], &status);
+    cuMPI_CocurrentEnd(pipe[i]);
+  }
   cudaDeviceSynchronize();
 
   timer.stop();
@@ -57,10 +55,13 @@ int main() {
   const int data_mibytes = (data_bytes >> 20);
   printf("Send & Recv NCCL tests\n");
   printf("Data Size Each Time:\t%12.6f MBytes\n", (double)data_mibytes);
+  printf("Total Double Exchange:\t%12.6f GBytes\n", (double)(2 * max_times * data_mibytes / 1024));
   printf("Performed times count:\t    %d\n", max_times);
   printf("Total Time cost:\t%12.6f seconds\n", time);
   printf("Average Time cost:\t%12.6f seconds\n", time/(double)(max_times));
-  printf("Average Bus width:\t%12.6f GBytes/s\n", (double)(max_times * data_mibytes / 1024)/time);
+  printf("Average Bus width(S):\t%12.6f GBytes/s\n", (double)(max_times * data_mibytes / 1024)/time);
+  printf("Average Bus width(D):\t%12.6f GBytes/s\n", (double)(2 * max_times * data_mibytes / 1024)/time);
+  printf("* S: Single Direction\tD: Double Direction\n\n");
 
   for (int i = 0; i < max_times; ++i) {
     CUDA_CHECK(cudaFree(d_send[i]));
