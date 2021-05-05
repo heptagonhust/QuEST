@@ -22,15 +22,12 @@ std::map<cuMPI_Comm, cudaStream_t> comm2stream;
 #define cuMPI_MAX_AMPS_IN_MSG (1LL<<28) // fine-tuned
 
 #define NCCL_COCURRENT_MULTI_PIPE
-// #define NCCL_COCURRENT_TWO_PIPE
-// #define NCCL_NO_COCURRENT
 
-#ifdef NCCL_COCURRENT_MULTI_PIPE
-cuMPI_Comm pipeReal[1024], pipeImag[1024];
-#endif
-#ifdef NCCL_COCURRENT_TWO_PIPE
-cuMPI_Comm pipeReal, pipeImag;
-#endif
+cuMPI_Comm pipeComp[1024], pipeReal[1024], pipeImag[1024];
+cudaStream_t stream[1024];
+
+int numMessagesForNCCL;
+long long int maxMessageCountForNCCL;
 /*******************************************************************/
 
 //cuMPI_Init
@@ -454,6 +451,30 @@ static int densityMatrixBlockFitsInChunk(long long int chunkSize, int numQubits,
 }
 
 
+inline void calcNumMessagesForNCCL(Qureg *qureg) {
+  // Multiple messages are required as cuMPI uses int rather than long long int for count
+  // For openmpi, messages are further restricted to 2GB in size -- do this for all cases
+  // to be safe
+  maxMessageCountForNCCL = cuMPI_MAX_AMPS_IN_MSG;
+  if (qureg->numAmpsPerChunk < maxMessageCountForNCCL)
+      maxMessageCountForNCCL = qureg->numAmpsPerChunk;
+
+  // safely assume cuMPI_MAX... = 2^n, so division always exact
+  numMessagesForNCCL = qureg->numAmpsPerChunk/maxMessageCountForNCCL;
+}
+
+void exchangeStateVectorsSliceAsync(Qureg qureg, int pairRank, int sliceIdx){  
+  int TAG=100;
+  cuMPI_Status status;
+  long long int offset = sliceIdx*maxMessageCountForNCCL;
+  // send my state vector to pairRank's qureg.pairStateVec
+  // receive pairRank's state vector into qureg.pairStateVec
+  cuMPI_CocurrentStart(pipeComp[sliceIdx]);
+  cuMPI_Complex_Sendrecv(&qureg.stateVec.real[offset], &qureg.stateVec.imag[offset], numMessagesForNCCL, cuMPI_QuEST_REAL, pairRank, TAG,
+          &qureg.pairStateVec.real[offset], &qureg.pairStateVec.imag[offset], numMessagesForNCCL, cuMPI_QuEST_REAL,
+          pairRank, TAG, pipeComp[sliceIdx], &status);
+  cuMPI_CocurrentEnd(pipeComp[sliceIdx]);
+}
 
 void exchangeStateVectors(Qureg qureg, int pairRank){
   // stage 1 done!
@@ -477,7 +498,6 @@ void exchangeStateVectors(Qureg qureg, int pairRank){
   long long int offset;
   // send my state vector to pairRank's qureg.pairStateVec
   // receive pairRank's state vector into qureg.pairStateVec
-  #ifdef NCCL_COCURRENT_MULTI_PIPE
   for (i=0; i<numMessages; i++){
       offset = i*maxMessageCount;
       cuMPI_CocurrentStart(pipeReal[i]);
@@ -497,38 +517,6 @@ void exchangeStateVectors(Qureg qureg, int pairRank){
     cudaStreamSynchronize(comm2stream[pipeReal[i]]);
     cudaStreamSynchronize(comm2stream[pipeImag[i]]);
   }
-  #endif
-  #ifdef NCCL_COCURRENT_TWO_PIPE
-  for (i=0; i<numMessages; i++){
-    offset = i*maxMessageCount;
-    cuMPI_CocurrentStart(pipeReal);
-    cuMPI_Sendrecv(&qureg.stateVec.real[offset], maxMessageCount, cuMPI_QuEST_REAL, pairRank, TAG,
-            &qureg.pairStateVec.real[offset], maxMessageCount, cuMPI_QuEST_REAL,
-            pairRank, TAG, pipeReal, &status);
-    cuMPI_CocurrentEnd(pipeReal);
-    //printf("rank: %d err: %d\n", qureg.rank, err);
-    cuMPI_CocurrentStart(pipeImag);
-    cuMPI_Sendrecv(&qureg.stateVec.imag[offset], maxMessageCount, cuMPI_QuEST_REAL, pairRank, TAG,
-            &qureg.pairStateVec.imag[offset], maxMessageCount, cuMPI_QuEST_REAL,
-            pairRank, TAG, pipeImag, &status);
-    cuMPI_CocurrentEnd(pipeImag);
-  }
-
-  cudaStreamSynchronize(comm2stream[pipeReal]);
-  cudaStreamSynchronize(comm2stream[pipeImag]);
-  #endif
-  #ifdef NCCL_NO_COCURRENT
-  for (i=0; i<numMessages; i++){
-    offset = i*maxMessageCount;
-    cuMPI_Sendrecv(&qureg.stateVec.real[offset], maxMessageCount, cuMPI_QuEST_REAL, pairRank, TAG,
-            &qureg.pairStateVec.real[offset], maxMessageCount, cuMPI_QuEST_REAL,
-            pairRank, TAG, cuMPI_COMM_WORLD, &status);
-    //printf("rank: %d err: %d\n", qureg.rank, err);
-    cuMPI_Sendrecv(&qureg.stateVec.imag[offset], maxMessageCount, cuMPI_QuEST_REAL, pairRank, TAG,
-            &qureg.pairStateVec.imag[offset], maxMessageCount, cuMPI_QuEST_REAL,
-            pairRank, TAG, cuMPI_COMM_WORLD, &status);
-  }
-  #endif
 }
 
 void exchangePairStateVectorHalves(Qureg qureg, int pairRank){
@@ -678,6 +666,8 @@ void compressPairVectorForSingleQubitDepolarise(Qureg qureg, const int targetQub
 }
 
 __global__ void statevec_compactUnitaryDistributedKernel (
+  const int sliceIdx,
+  const long long int sliceOffset,
   const long long int chunkSize,
   Complex rot1, Complex rot2,
   ComplexArray deviceStateVecUp,
@@ -685,10 +675,11 @@ __global__ void statevec_compactUnitaryDistributedKernel (
   ComplexArray deviceStateVecOut
 ){
   qreal   stateRealUp,stateRealLo,stateImagUp,stateImagLo;
-  long long int thisTask = blockIdx.x*blockDim.x + threadIdx.x;
+  long long int exactKernelIdx = blockIdx.x*blockDim.x + threadIdx.x;
+  long long int thisTask = exactKernelIdx + sliceIdx*sliceOffset;
   const long long int numTasks = chunkSize;
 
-  if (thisTask>=numTasks) return;
+  if (exactKernelIdx >= sliceOffset || thisTask>=numTasks) return;
 
   qreal rot1Real=rot1.real, rot1Imag=rot1.imag;
   qreal rot2Real=rot2.real, rot2Imag=rot2.imag;
@@ -719,27 +710,34 @@ __global__ void statevec_compactUnitaryDistributedKernel (
  *  @param[in] stateVecLo probability amplitudes in lower half of a block
  *  @param[out] stateVecOut array section to update (will correspond to either the lower or upper half of a block)
  */
- void statevec_compactUnitaryDistributed (Qureg qureg,
+ void statevec_compactUnitaryDistributed (Qureg qureg, int pairRank,
   Complex rot1, Complex rot2,
   ComplexArray stateVecUp,
   ComplexArray stateVecLo,
   ComplexArray stateVecOut)
 {
-  assert(isReadyOnGPU(qureg));
+
   int threadsPerCUDABlock, CUDABlocks;
   threadsPerCUDABlock = 128;
-  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
-  statevec_compactUnitaryDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
-    qureg.numAmpsPerChunk,
-    rot1,
-    rot2,
-    stateVecUp, //upper
-    stateVecLo, //lower
-    stateVecOut); //output
+  CUDABlocks = ceil((qreal)(maxMessageCountForNCCL)/threadsPerCUDABlock);
+
+  for (int i = 0; i < numMessagesForNCCL; ++i) {
+    exchangeStateVectorsSliceAsync(qureg, pairRank, i);
+    statevec_compactUnitaryDistributedKernel<<<CUDABlocks, threadsPerCUDABlock, 0, stream[i]>>>(
+      i, //sliceIdx
+      maxMessageCountForNCCL, //sliceOffset
+      qureg.numAmpsPerChunk,
+      rot1,
+      rot2,
+      stateVecUp, //upper
+      stateVecLo, //lower
+      stateVecOut); //output  
+  }  
 }
 
 void statevec_compactUnitary(Qureg qureg, const int targetQubit, Complex alpha, Complex beta)
 {
+  // stage 2 done!
   // stage 1 done! need to optimize!
   // !!simple in local_cpu
 
@@ -760,17 +758,17 @@ void statevec_compactUnitary(Qureg qureg, const int targetQubit, Complex alpha, 
     getRotAngle(rankIsUpper, &rot1, &rot2, alpha, beta);
     pairRank = getChunkPairId(rankIsUpper, qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);
     // get corresponding values from my pair
-    exchangeStateVectors(qureg, pairRank);
+    // exchangeStateVectors(qureg, pairRank);
 
     // this rank's values are either in the upper of lower half of the block.
     // send values to compactUnitaryDistributed in the correct order
     if (rankIsUpper){
-      statevec_compactUnitaryDistributed(qureg,rot1,rot2,
+      statevec_compactUnitaryDistributed(qureg,pairRank,rot1,rot2,
               qureg.stateVec, //upper
               qureg.pairStateVec, //lower
               qureg.stateVec); //output
     } else {
-      statevec_compactUnitaryDistributed(qureg,rot1,rot2,
+      statevec_compactUnitaryDistributed(qureg,pairRank,rot1,rot2,
               qureg.pairStateVec, //upper
               qureg.stateVec, //lower
               qureg.stateVec); //output
@@ -799,17 +797,17 @@ void statevec_unitary(Qureg qureg, const int targetQubit, ComplexMatrix2 u)
     getRotAngleFromUnitaryMatrix(rankIsUpper, &rot1, &rot2, u);
     pairRank = getChunkPairId(rankIsUpper, qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);
     // get corresponding values from my pair
-    exchangeStateVectors(qureg, pairRank);
+    // exchangeStateVectors(qureg, pairRank);
 
     // this rank's values are either in the upper of lower half of the block.
     // send values to compactUnitaryDistributed in the correct order
     if (rankIsUpper){
-      statevec_unitaryDistributed(qureg,rot1,rot2,
+      statevec_unitaryDistributed(qureg,pairRank,rot1,rot2,
               qureg.stateVec, //upper
               qureg.pairStateVec, //lower
               qureg.stateVec); //output
     } else {
-      statevec_unitaryDistributed(qureg,rot1,rot2,
+      statevec_unitaryDistributed(qureg,pairRank,rot1,rot2,
               qureg.pairStateVec, //upper
               qureg.stateVec, //lower
               qureg.stateVec); //output
@@ -818,6 +816,8 @@ void statevec_unitary(Qureg qureg, const int targetQubit, ComplexMatrix2 u)
 }
 
 __global__ void statevec_controlledCompactUnitaryDistributedKernel (
+  const int sliceIdx,
+  const long long int sliceOffset,
   const long long int chunkSize,
   const long long int chunkId,
   const int controlQubit,
@@ -827,10 +827,11 @@ __global__ void statevec_controlledCompactUnitaryDistributedKernel (
   ComplexArray deviceStateVecOut
 ){
   qreal   stateRealUp,stateRealLo,stateImagUp,stateImagLo;
-  long long int thisTask = blockIdx.x*blockDim.x + threadIdx.x;
+  long long int exactKernelIdx = blockIdx.x*blockDim.x + threadIdx.x;
+  long long int thisTask = exactKernelIdx + sliceIdx*sliceOffset;
   const long long int numTasks = chunkSize;
 
-  if (thisTask>=numTasks) return;
+  if (exactKernelIdx >= sliceOffset || thisTask>=numTasks) return;
 
   // const long long int chunkSize=qureg.numAmpsPerChunk;
   // const long long int chunkId=qureg.chunkId;
@@ -868,30 +869,37 @@ __global__ void statevec_controlledCompactUnitaryDistributedKernel (
  *  @param[in] stateVecLo probability amplitudes in lower half of a block
  *  @param[out] stateVecOut array section to update (will correspond to either the lower or upper half of a block)
  */
- void statevec_controlledCompactUnitaryDistributed (Qureg qureg, const int controlQubit,
+ void statevec_controlledCompactUnitaryDistributed (Qureg qureg, int pairRank, const int controlQubit,
   Complex rot1, Complex rot2,
   ComplexArray stateVecUp,
   ComplexArray stateVecLo,
   ComplexArray stateVecOut)
 {
-  assert(isReadyOnGPU(qureg));
+  
   int threadsPerCUDABlock, CUDABlocks;
   threadsPerCUDABlock = 128;
-  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
-  statevec_controlledCompactUnitaryDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
-    qureg.numAmpsPerChunk,
-    qureg.chunkId,
-    controlQubit,
-    rot1,
-    rot2, 
-    stateVecUp, 
-    stateVecLo,
-    stateVecOut
-  );
+  CUDABlocks = ceil((qreal)(maxMessageCountForNCCL)/threadsPerCUDABlock);
+
+  for (int i = 0; i < numMessagesForNCCL; ++i) {
+    exchangeStateVectorsSliceAsync(qureg, pairRank, i);
+    statevec_controlledCompactUnitaryDistributedKernel<<<CUDABlocks, threadsPerCUDABlock, 0, stream[i]>>>(
+      i, //sliceIdx
+      maxMessageCountForNCCL, //sliceOffset
+      qureg.numAmpsPerChunk,
+      qureg.chunkId,
+      controlQubit,
+      rot1,
+      rot2, 
+      stateVecUp, 
+      stateVecLo,
+      stateVecOut
+    );
+  }
 }
 
 void statevec_controlledCompactUnitary(Qureg qureg, const int controlQubit, const int targetQubit, Complex alpha, Complex beta)
 {
+  // stage 2 done!
   // stage 1 done! need to optimize!
 
   //!!simple in local_cpu
@@ -914,17 +922,17 @@ void statevec_controlledCompactUnitary(Qureg qureg, const int controlQubit, cons
     pairRank = getChunkPairId(rankIsUpper, qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);
     //printf("%d rank has pair rank: %d\n", qureg.rank, pairRank);
     // get corresponding values from my pair
-    exchangeStateVectors(qureg, pairRank);
+    // exchangeStateVectors(qureg, pairRank);
 
     // this rank's values are either in the upper of lower half of the block. send values to controlledCompactUnitaryDistributed
     // in the correct order
     if (rankIsUpper){
-      statevec_controlledCompactUnitaryDistributed(qureg,controlQubit,rot1,rot2,
+      statevec_controlledCompactUnitaryDistributed(qureg,pairRank,controlQubit,rot1,rot2,
               qureg.stateVec, //upper
               qureg.pairStateVec, //lower
               qureg.stateVec); //output
     } else {
-      statevec_controlledCompactUnitaryDistributed(qureg,controlQubit,rot1,rot2,
+      statevec_controlledCompactUnitaryDistributed(qureg,pairRank,controlQubit,rot1,rot2,
               qureg.pairStateVec, //upper
               qureg.stateVec, //lower
               qureg.stateVec); //output
@@ -956,17 +964,17 @@ void statevec_controlledUnitary(Qureg qureg, const int controlQubit, const int t
     pairRank = getChunkPairId(rankIsUpper, qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);
     //printf("%d rank has pair rank: %d\n", qureg.rank, pairRank);
     // get corresponding values from my pair
-    exchangeStateVectors(qureg, pairRank);
+    // exchangeStateVectors(qureg, pairRank);
 
     // this rank's values are either in the upper of lower half of the block. send values to controlledUnitaryDistributed
     // in the correct order
     if (rankIsUpper){
-      statevec_controlledUnitaryDistributed(qureg,controlQubit,rot1,rot2,
+      statevec_controlledUnitaryDistributed(qureg,pairRank,controlQubit,rot1,rot2,
               qureg.stateVec, //upper
               qureg.pairStateVec, //lower
               qureg.stateVec); //output
     } else {
-      statevec_controlledUnitaryDistributed(qureg,controlQubit,rot1,rot2,
+      statevec_controlledUnitaryDistributed(qureg,pairRank,controlQubit,rot1,rot2,
               qureg.pairStateVec, //upper
               qureg.stateVec, //lower
               qureg.stateVec); //output
@@ -997,17 +1005,17 @@ void statevec_multiControlledUnitary(Qureg qureg, long long int ctrlQubitsMask, 
     pairRank = getChunkPairId(rankIsUpper, qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);
 
     // get corresponding values from my pair
-    exchangeStateVectors(qureg, pairRank);
+    // exchangeStateVectors(qureg, pairRank);
 
     // this rank's values are either in the upper of lower half of the block. send values to multiControlledUnitaryDistributed
     // in the correct order
     if (rankIsUpper){
-      statevec_multiControlledUnitaryDistributed(qureg,targetQubit,ctrlQubitsMask,ctrlFlipMask,rot1,rot2,
+      statevec_multiControlledUnitaryDistributed(qureg,pairRank,targetQubit,ctrlQubitsMask,ctrlFlipMask,rot1,rot2,
               qureg.stateVec, //upper
               qureg.pairStateVec, //lower
               qureg.stateVec); //output
     } else {
-      statevec_multiControlledUnitaryDistributed(qureg,targetQubit,ctrlQubitsMask,ctrlFlipMask,rot1,rot2,
+      statevec_multiControlledUnitaryDistributed(qureg,pairRank,targetQubit,ctrlQubitsMask,ctrlFlipMask,rot1,rot2,
               qureg.pairStateVec, //upper
               qureg.stateVec, //lower
               qureg.stateVec); //output
@@ -1016,16 +1024,19 @@ void statevec_multiControlledUnitary(Qureg qureg, long long int ctrlQubitsMask, 
 }
 
 __global__ void statevec_pauliXDistributedKernel(
+  const int sliceIdx,
+  const long long int sliceOffset,
   const long long int chunkSize,
   ComplexArray deviceStateVecIn,
   ComplexArray deviceStateVecOut
 ){
   // stage 1 done! need to optimize!
 
-  long long int thisTask = blockIdx.x*blockDim.x + threadIdx.x;
+  long long int exactKernelIdx = blockIdx.x*blockDim.x + threadIdx.x;
+  long long int thisTask = exactKernelIdx + sliceIdx*sliceOffset;
   const long long int numTasks = chunkSize;
 
-  if (thisTask>=numTasks) return;
+  if (exactKernelIdx >= sliceOffset || thisTask>=numTasks) return;
 
   qreal *stateVecRealIn=deviceStateVecIn.real, *stateVecImagIn=deviceStateVecIn.imag;
   qreal *stateVecRealOut=deviceStateVecOut.real, *stateVecImagOut=deviceStateVecOut.imag;
@@ -1046,20 +1057,25 @@ __global__ void statevec_pauliXDistributedKernel(
  *  @param[in] stateVecIn probability amplitudes in lower or upper half of a block depending on chunkId
  *  @param[out] stateVecOut array section to update (will correspond to either the lower or upper half of a block)
  */
-void statevec_pauliXDistributed (Qureg qureg,
+void statevec_pauliXDistributed (Qureg qureg, int pairRank, 
         ComplexArray stateVecIn,
         ComplexArray stateVecOut)
 {
-  assert(isReadyOnGPU(qureg));
+  
   int threadsPerCUDABlock, CUDABlocks;
   threadsPerCUDABlock = 128;
-  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
-  statevec_pauliXDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg.numAmpsPerChunk, stateVecIn, stateVecOut);
+  CUDABlocks = ceil((qreal)(maxMessageCountForNCCL)/threadsPerCUDABlock);
+
+  for (int i = 0; i < numMessagesForNCCL; ++i) {
+    exchangeStateVectorsSliceAsync(qureg, pairRank, i);
+    statevec_pauliXDistributedKernel<<<CUDABlocks, threadsPerCUDABlock, 0, stream[i]>>>(
+      i, maxMessageCountForNCCL, qureg.numAmpsPerChunk, stateVecIn, stateVecOut);
+  }
 }
 
 void statevec_pauliX(Qureg qureg, const int targetQubit)
 {
-
+  // stage 2 done!
   // stage 1 done!
 
   //!!simple in local_cpu
@@ -1080,10 +1096,10 @@ void statevec_pauliX(Qureg qureg, const int targetQubit)
     pairRank = getChunkPairId(rankIsUpper, qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);
     //printf("%d rank has pair rank: %d\n", qureg.rank, pairRank);
     // get corresponding values from my pair
-    exchangeStateVectors(qureg, pairRank);
+    // exchangeStateVectors(qureg, pairRank);
     // this rank's values are either in the upper of lower half of the block. pauliX just replaces
     // this rank's values with pair values
-    statevec_pauliXDistributed(qureg,
+    statevec_pauliXDistributed(qureg, pairRank,
             qureg.pairStateVec, // in
             qureg.stateVec/*not sure TODO*/); // out
   }
@@ -1091,16 +1107,19 @@ void statevec_pauliX(Qureg qureg, const int targetQubit)
 
 
 __global__ void statevec_controlledNotDistributedKernel (
+  const int sliceIdx,
+  const long long int sliceOffset,
   const long long int chunkSize, 
   const long long int chunkId,
   const int controlQubit,
   ComplexArray deviceStateVecIn,
   ComplexArray deviceStateVecOut
 ){
-  long long int thisTask = blockIdx.x*blockDim.x + threadIdx.x;
+  long long int exactKernelIdx = blockIdx.x*blockDim.x + threadIdx.x;
+  long long int thisTask = exactKernelIdx + sliceIdx*sliceOffset;
   const long long int numTasks = chunkSize;
 
-  if (thisTask>=numTasks) return;
+  if (exactKernelIdx >= sliceOffset || thisTask>=numTasks) return;
 
   // const long long int chunkSize=qureg.numAmpsPerChunk;
   // const long long int chunkId=qureg.chunkId;
@@ -1127,26 +1146,32 @@ __global__ void statevec_controlledNotDistributedKernel (
  *  @param[in] stateVecIn probability amplitudes in lower or upper half of a block depending on chunkId
  *  @param[out] stateVecOut array section to update (will correspond to either the lower or upper half of a block)
  */
- void statevec_controlledNotDistributed (Qureg qureg, const int controlQubit,
+ void statevec_controlledNotDistributed (Qureg qureg, int pairRank, const int controlQubit,
   ComplexArray stateVecIn,
   ComplexArray stateVecOut)
 {
-  assert(isReadyOnGPU(qureg));
+  
   int threadsPerCUDABlock, CUDABlocks;
   threadsPerCUDABlock = 128;
-  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
-  statevec_controlledNotDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
-    qureg.numAmpsPerChunk, 
-    qureg.chunkId, 
-    controlQubit, 
-    stateVecIn, 
-    stateVecOut
-  );  
+  CUDABlocks = ceil((qreal)(maxMessageCountForNCCL)/threadsPerCUDABlock);
+  for (int i = 0; i < numMessagesForNCCL; ++i) {
+    exchangeStateVectorsSliceAsync(qureg, pairRank, i);
+    statevec_controlledNotDistributedKernel<<<CUDABlocks, threadsPerCUDABlock, 0, stream[i]>>>(
+      i, //sliceIdx
+      maxMessageCountForNCCL, //sliceOffset
+      qureg.numAmpsPerChunk, 
+      qureg.chunkId, 
+      controlQubit, 
+      stateVecIn, 
+      stateVecOut
+    );
+  }
 } 
 
 
 void statevec_controlledNot(Qureg qureg, const int controlQubit, const int targetQubit)
 {
+  // stage 2 done!
   // stage 1 done! need to optimize!
 
   //!!simple in local_cpu
@@ -1164,14 +1189,14 @@ void statevec_controlledNot(Qureg qureg, const int controlQubit, const int targe
     rankIsUpper = chunkIsUpper(qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);
     pairRank = getChunkPairId(rankIsUpper, qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);
     // get corresponding values from my pair
-    exchangeStateVectors(qureg, pairRank);
+    // exchangeStateVectors(qureg, pairRank);
     // this rank's values are either in the upper of lower half of the block
     if (rankIsUpper){
-      statevec_controlledNotDistributed(qureg,controlQubit,
+      statevec_controlledNotDistributed(qureg,pairRank,controlQubit,
               qureg.pairStateVec, //in
               qureg.stateVec); //out
     } else {
-      statevec_controlledNotDistributed(qureg,controlQubit,
+      statevec_controlledNotDistributed(qureg,pairRank,controlQubit,
               qureg.pairStateVec, //in
               qureg.stateVec); //out
     }
@@ -1183,15 +1208,18 @@ void statevec_controlledNot(Qureg qureg, const int controlQubit, const int targe
 }
 
 __global__ void statevec_pauliYDistributedKernel(
+  const int sliceIdx,
+  const long long int sliceOffset,
   const long long int chunkSize,
   ComplexArray deviceStateVecIn,
   ComplexArray deviceStateVecOut,
   int updateUpper, const int conjFac
 ){
-  long long int thisTask = blockIdx.x*blockDim.x + threadIdx.x;;
+  long long int exactKernelIdx = blockIdx.x*blockDim.x + threadIdx.x;
+  long long int thisTask = exactKernelIdx + sliceIdx*sliceOffset;
   const long long int numTasks = chunkSize;
 
-  if (thisTask>=numTasks) return;
+  if (exactKernelIdx >= sliceOffset || thisTask>=numTasks) return;
 
   qreal *stateVecRealIn=deviceStateVecIn.real, *stateVecImagIn=deviceStateVecIn.imag;
   qreal *stateVecRealOut=deviceStateVecOut.real, *stateVecImagOut=deviceStateVecOut.imag;
@@ -1217,26 +1245,32 @@ __global__ void statevec_pauliYDistributedKernel(
  *  @param[in] updateUpper flag, 1: updating upper values, 0: updating lower values in block
  *  @param[out] stateVecOut array section to update (will correspond to either the lower or upper half of a block)
  */
-void statevec_pauliYDistributed(Qureg qureg,
+void statevec_pauliYDistributed(Qureg qureg, int pairRank,
         ComplexArray stateVecIn,
         ComplexArray stateVecOut,
         int updateUpper, const int conjFac)
 {
-  assert(isReadyOnGPU(qureg));
+  
   int threadsPerCUDABlock, CUDABlocks;
   threadsPerCUDABlock = 128;
-  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
-  statevec_pauliYDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
-    qureg.numAmpsPerChunk, 
-    stateVecIn, 
-    stateVecOut, 
-    updateUpper, 
-    conjFac
-  );
+  CUDABlocks = ceil((qreal)(maxMessageCountForNCCL)/threadsPerCUDABlock);
+  for (int i = 0; i < numMessagesForNCCL; ++i) {
+    exchangeStateVectorsSliceAsync(qureg, pairRank, i);
+    statevec_pauliYDistributedKernel<<<CUDABlocks, threadsPerCUDABlock, 0, stream[i]>>>(
+      i, //sliceIdx
+      maxMessageCountForNCCL, //sliceOffset
+      qureg.numAmpsPerChunk, 
+      stateVecIn, 
+      stateVecOut, 
+      updateUpper, 
+      conjFac
+    );
+  }
 }
 
 void statevec_pauliY(Qureg qureg, const int targetQubit)
 {
+  // stage 2 done!
   // stage 1 done! need to optizize!
 
   //!!care about local_cpu code blow:
@@ -1256,9 +1290,9 @@ void statevec_pauliY(Qureg qureg, const int targetQubit)
         rankIsUpper = chunkIsUpper(qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);
         pairRank = getChunkPairId(rankIsUpper, qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);
         // get corresponding values from my pair
-        exchangeStateVectors(qureg, pairRank);
+        // exchangeStateVectors(qureg, pairRank);
         // this rank's values are either in the upper of lower half of the block
-        statevec_pauliYDistributed(qureg,
+        statevec_pauliYDistributed(qureg,pairRank,
                 qureg.pairStateVec, // in
                 /*not sure TODO*/qureg.stateVec, // out
                 rankIsUpper, conjFac);
@@ -1286,9 +1320,9 @@ void statevec_pauliYConj(Qureg qureg, const int targetQubit)
     rankIsUpper = chunkIsUpper(qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);
     pairRank = getChunkPairId(rankIsUpper, qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);
     // get corresponding values from my pair
-    exchangeStateVectors(qureg, pairRank);
+    // exchangeStateVectors(qureg, pairRank);
     // this rank's values are either in the upper of lower half of the block
-    statevec_pauliYDistributed(qureg,
+    statevec_pauliYDistributed(qureg,pairRank,
             qureg.pairStateVec, // in
             qureg.stateVec/*not sure TODO*/, // out
             rankIsUpper, conjFac);
@@ -1296,6 +1330,8 @@ void statevec_pauliYConj(Qureg qureg, const int targetQubit)
 }
 
 __global__ void statevec_controlledPauliYDistributedKernel (
+  const int sliceIdx,
+  const long long int sliceOffset,
   const long long int chunkSize, 
   const long long int chunkId,
   const int controlQubit,
@@ -1303,10 +1339,11 @@ __global__ void statevec_controlledPauliYDistributedKernel (
   ComplexArray deviceStateVecOut, 
   const int conjFac
 ){
-  long long int thisTask = blockIdx.x*blockDim.x + threadIdx.x; 
+  long long int exactKernelIdx = blockIdx.x*blockDim.x + threadIdx.x;
+  long long int thisTask = exactKernelIdx + sliceIdx*sliceOffset;
   const long long int numTasks = chunkSize;
 
-  if (thisTask>=numTasks) return;
+  if (exactKernelIdx >= sliceOffset || thisTask>=numTasks) return;
 
   // const long long int chunkSize=qureg.numAmpsPerChunk;
   // const long long int chunkId=qureg.chunkId;
@@ -1321,26 +1358,32 @@ __global__ void statevec_controlledPauliYDistributedKernel (
   }
 }
 
-void statevec_controlledPauliYDistributed (Qureg qureg, const int controlQubit,
+void statevec_controlledPauliYDistributed (Qureg qureg, int pairRank, const int controlQubit,
   ComplexArray stateVecIn,
   ComplexArray stateVecOut, const int conjFac)
 {
-  assert(isReadyOnGPU(qureg));
+  
   int threadsPerCUDABlock, CUDABlocks;
   threadsPerCUDABlock = 128;
-  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
-  statevec_controlledPauliYDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
-    qureg.numAmpsPerChunk, 
-    qureg.chunkId,
-    controlQubit,
-    stateVecIn, 
-    stateVecOut,
-    conjFac
-  );
+  CUDABlocks = ceil((qreal)(maxMessageCountForNCCL)/threadsPerCUDABlock);
+  for (int i = 0; i < numMessagesForNCCL; ++i) {
+    exchangeStateVectorsSliceAsync(qureg, pairRank, i);
+    statevec_controlledPauliYDistributedKernel<<<CUDABlocks, threadsPerCUDABlock, 0, stream[i]>>>(
+      i, //sliceIdx
+      maxMessageCountForNCCL, //sliceOffset
+      qureg.numAmpsPerChunk, 
+      qureg.chunkId,
+      controlQubit,
+      stateVecIn, 
+      stateVecOut,
+      conjFac
+    );
+  }
 } 
 
 void statevec_controlledPauliY(Qureg qureg, const int controlQubit, const int targetQubit)
 {
+  // stage 2 done!
   // stage 1 done! need to optimize!
 
   // 20210420, conjLocal & Local can merge into one in local gpu!
@@ -1362,15 +1405,15 @@ void statevec_controlledPauliY(Qureg qureg, const int controlQubit, const int ta
     rankIsUpper = chunkIsUpper(qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);
     pairRank = getChunkPairId(rankIsUpper, qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);
     // get corresponding values from my pair
-    exchangeStateVectors(qureg, pairRank);
+    // exchangeStateVectors(qureg, pairRank);
     // this rank's values are either in the upper of lower half of the block
     if (rankIsUpper){
-      statevec_controlledPauliYDistributed(qureg,controlQubit,
+      statevec_controlledPauliYDistributed(qureg,pairRank,controlQubit,
               qureg.pairStateVec, //in
               qureg.stateVec,
               conjFac); //out
     } else {
-      statevec_controlledPauliYDistributed(qureg,controlQubit,
+      statevec_controlledPauliYDistributed(qureg,pairRank,controlQubit,
               qureg.pairStateVec, //in
               qureg.stateVec,
               -conjFac); //out
@@ -1401,15 +1444,15 @@ void statevec_controlledPauliYConj(Qureg qureg, const int controlQubit, const in
     rankIsUpper = chunkIsUpper(qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);
     pairRank = getChunkPairId(rankIsUpper, qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);
     // get corresponding values from my pair
-    exchangeStateVectors(qureg, pairRank);
+    // exchangeStateVectors(qureg, pairRank);
     // this rank's values are either in the upper of lower half of the block
     if (rankIsUpper){
-      statevec_controlledPauliYDistributed(qureg,controlQubit,
+      statevec_controlledPauliYDistributed(qureg,pairRank,controlQubit,
               qureg.pairStateVec, //in
               qureg.stateVec,
               conjFac); //out
     } else {
-      statevec_controlledPauliYDistributed(qureg,controlQubit,
+      statevec_controlledPauliYDistributed(qureg,pairRank,controlQubit,
               qureg.pairStateVec, //in
               qureg.stateVec,
               -conjFac); //out
@@ -1418,6 +1461,8 @@ void statevec_controlledPauliYConj(Qureg qureg, const int controlQubit, const in
 }
 
 __global__ void statevec_hadamardDistributedKernel(
+  const int sliceIdx,
+  const long long int sliceOffset,
   const long long int chunkSize,
   ComplexArray deviceStateVecUp,
   ComplexArray deviceStateVecLo,
@@ -1425,10 +1470,11 @@ __global__ void statevec_hadamardDistributedKernel(
   int updateUpper
 ){
   qreal   stateRealUp,stateRealLo,stateImagUp,stateImagLo;
-  long long int thisTask = blockIdx.x*blockDim.x + threadIdx.x;
+  long long int exactKernelIdx = blockIdx.x*blockDim.x + threadIdx.x;
+  long long int thisTask = exactKernelIdx + sliceIdx*sliceOffset;
   const long long int numTasks = chunkSize;
 
-  if (thisTask>=numTasks) return;
+  if (exactKernelIdx >= sliceOffset || thisTask>=numTasks) return;
 
   int sign;
   if (updateUpper) sign=1;
@@ -1461,26 +1507,32 @@ __global__ void statevec_hadamardDistributedKernel(
  *  @param[in] updateUpper flag, 1: updating upper values, 0: updating lower values in block
  *  @param[out] stateVecOut array section to update (will correspond to either the lower or upper half of a block)
  */
- void statevec_hadamardDistributed(Qureg qureg,
+ void statevec_hadamardDistributed(Qureg qureg, int pairRank,
   ComplexArray stateVecUp,
   ComplexArray stateVecLo,
   ComplexArray stateVecOut,
   int updateUpper)
 {
-  assert(isReadyOnGPU(qureg));
+  
   int threadsPerCUDABlock, CUDABlocks;
   threadsPerCUDABlock = 128;
-  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
-  statevec_hadamardDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
-    qureg.numAmpsPerChunk,
-    stateVecUp, //upper
-    stateVecLo, //lower
-    stateVecOut, updateUpper //output
-  );
+  CUDABlocks = ceil((qreal)(maxMessageCountForNCCL)/threadsPerCUDABlock);
+  for (int i = 0; i < numMessagesForNCCL; ++i) {
+    exchangeStateVectorsSliceAsync(qureg, pairRank, i);
+    statevec_hadamardDistributedKernel<<<CUDABlocks, threadsPerCUDABlock, 0, stream[i]>>>(
+      i, //sliceIdx
+      maxMessageCountForNCCL, //sliceOffset
+      qureg.numAmpsPerChunk,
+      stateVecUp, //upper
+      stateVecLo, //lower
+      stateVecOut, updateUpper //output
+    );
+  }
 }
 
 void statevec_hadamard(Qureg qureg, const int targetQubit)
 {
+  // stage 2 done!
   // stage 1 done! need to optimize!
   //!!simple in local_cpu
 
@@ -1500,16 +1552,16 @@ void statevec_hadamard(Qureg qureg, const int targetQubit)
     pairRank = getChunkPairId(rankIsUpper, qureg.chunkId, qureg.numAmpsPerChunk, targetQubit);
     //printf("%d rank has pair rank: %d\n", qureg.rank, pairRank);
     // get corresponding values from my pair
-    exchangeStateVectors(qureg, pairRank);
+    // exchangeStateVectors(qureg, pairRank);
     // this rank's values are either in the upper of lower half of the block. send values to hadamardDistributed
     // in the correct order
     if (rankIsUpper){
-      statevec_hadamardDistributed(qureg,
+      statevec_hadamardDistributed(qureg,pairRank,
               qureg.stateVec, //upper
               qureg.pairStateVec, //lower
               qureg.stateVec, rankIsUpper); //output
     } else {
-      statevec_hadamardDistributed(qureg,
+      statevec_hadamardDistributed(qureg,pairRank,
               qureg.pairStateVec, //upper
               qureg.stateVec, //lower
               qureg.stateVec, rankIsUpper); //output
@@ -1714,6 +1766,7 @@ void statevec_swapQubitAmps(Qureg qureg, int qb1, int qb2) {
 
   // determine and swap amps with pair node
   int pairRank = flipBitOnCPU(flipBitOnCPU(oddParityGlobalInd, qb1), qb2) / qureg.numAmpsPerChunk;
+  assert(0);
   exchangeStateVectors(qureg, pairRank);
   statevec_swapQubitAmpsDistributed(qureg, pairRank, qb1, qb2);
 }
@@ -1878,28 +1931,10 @@ void statevec_createQureg(Qureg *qureg, int numQubits, QuESTEnv env)
     //     exit (EXIT_FAILURE);
     // }
 
-    // Multiple messages are required as cuMPI uses int rather than long long int for count
-    // For openmpi, messages are further restricted to 2GB in size -- do this for all cases
-    // to be safe
-    long long int maxMessageCount = cuMPI_MAX_AMPS_IN_MSG;
-    if (qureg->numAmpsPerChunk < maxMessageCount)
-        maxMessageCount = qureg->numAmpsPerChunk;
-
-    // safely assume cuMPI_MAX... = 2^n, so division always exact
-    int numMessages = qureg->numAmpsPerChunk/maxMessageCount;
-
-    #ifdef NCCL_COCURRENT_MULTI_PIPE
-    int i;
-    for (i=0; i<numMessages; i++) {
-      cuMPI_NewGlobalComm(&pipeReal[i]);
-      cuMPI_NewGlobalComm(&pipeImag[i]);
+    calcNumMessagesForNCCL(qureg);
+    for (int i=0; i<numMessagesForNCCL; i++) {
+      stream[i] = cuMPI_NewGlobalComm(&pipeComp[i]);
     }
-    #endif
-    #ifdef NCCL_COCURRENT_TWO_PIPE
-    cuMPI_NewGlobalComm(&pipeReal);
-    cuMPI_NewGlobalComm(&pipeImag);
-    #endif
-
 }
 
 void statevec_destroyQureg(Qureg qureg, QuESTEnv env)

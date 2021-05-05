@@ -68,18 +68,18 @@ qreal densmatr_calcInnerProduct(Qureg a, Qureg b){return (qreal)0;}
 #endif
 
 // TODO
-void statevec_unitaryDistributed (Qureg qureg,
+void statevec_unitaryDistributed (Qureg qureg, int pairRank,
         Complex rot1, Complex rot2,
         ComplexArray stateVecUp,
         ComplexArray stateVecLo,
         ComplexArray stateVecOut){}
-void statevec_controlledUnitaryDistributed (Qureg qureg, const int controlQubit,
+void statevec_controlledUnitaryDistributed (Qureg qureg, int pairRank, const int controlQubit,
         Complex rot1, Complex rot2,
         ComplexArray stateVecUp,
         ComplexArray stateVecLo,
         ComplexArray stateVecOut){}
 void statevec_multiControlledUnitaryDistributed (
-        Qureg qureg, 
+        Qureg qureg, int pairRank,
         const int targetQubit, 
         long long int ctrlQubitsMask, long long int ctrlFlipMask,
         Complex rot1, Complex rot2,
