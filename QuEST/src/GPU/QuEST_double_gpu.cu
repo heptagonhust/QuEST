@@ -471,11 +471,16 @@ void exchangeStateVectorsSliceAsync(Qureg qureg, int pairRank, int sliceIdx){
   long long int offset = sliceIdx*maxMessageCountForNCCL;
   // send my state vector to pairRank's qureg.pairStateVec
   // receive pairRank's state vector into qureg.pairStateVec
+  
   cuMPI_CocurrentStart(pipeComp[sliceIdx]);
   cuMPI_Complex_Sendrecv(&qureg.stateVec.real[offset], &qureg.stateVec.imag[offset], maxMessageCountForNCCL, cuMPI_QuEST_REAL, pairRank, TAG,
           &qureg.pairStateVec.real[offset], &qureg.pairStateVec.imag[offset], maxMessageCountForNCCL, cuMPI_QuEST_REAL,
           pairRank, TAG, pipeComp[sliceIdx], &status);
   cuMPI_CocurrentEnd(pipeComp[sliceIdx]);
+  
+  // cudaMemcpyPeerAsync(&qureg.pairStateVec.real[offset], qureg.chunkId, &qureg.stateVec.real[offset], pairRank, maxMessageCountForNCCL, stream[sliceIdx]);
+  // cudaMemcpyPeerAsync(&qureg.pairStateVec.imag[offset], qureg.chunkId, &qureg.stateVec.imag[offset], pairRank, maxMessageCountForNCCL, stream[sliceIdx]);
+
   // cudaStreamSynchronize(stream[sliceIdx]);
 }
 
@@ -1939,8 +1944,8 @@ void statevec_createQureg(Qureg *qureg, int numQubits, QuESTEnv env)
       stream[i] = cuMPI_NewGlobalComm(&pipeComp[i]);
     }
     for (int i=0; i<MAX_STREAM_NUMS; i++) {
-      cudaStreamCreateWithFlags(&streamLocal[i], cudaStreamNonBlocking);
-      // cudaStreamCreate(&streamLocal[i]);
+      // cudaStreamCreateWithFlags(&streamLocal[i], cudaStreamNonBlocking);
+      cudaStreamCreate(&streamLocal[i]);
     }
 }
 

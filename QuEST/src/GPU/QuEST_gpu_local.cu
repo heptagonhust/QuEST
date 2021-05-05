@@ -147,6 +147,7 @@ __global__ void statevec_compactUnitaryKernel (Qureg qureg, const int sliceIdx, 
 
 void statevec_compactUnitaryLocal(Qureg qureg, const int targetQubit, Complex alpha, Complex beta) 
 {
+    // stage 2 done!
     // stage 1 done!
     // chunkID done!
 
@@ -225,6 +226,7 @@ __global__ void statevec_controlledCompactUnitaryKernel (Qureg qureg, const int 
 
 void statevec_controlledCompactUnitaryLocal(Qureg qureg, const int controlQubit, const int targetQubit, Complex alpha, Complex beta) 
 {
+    // stage 2 done!
     // stage 1 done!
     // chunkID done!
 

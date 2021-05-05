@@ -317,7 +317,7 @@ void statevec_swapQubitAmpsDistributed(Qureg qureg, int pairRank, int qb1, int q
 void statevec_collapseToOutcomeDistributedSetZero(Qureg qureg);
 
 
-#define MAX_STREAM_NUMS 1024
+#define MAX_STREAM_NUMS 2
 extern cudaStream_t streamLocal[MAX_STREAM_NUMS];
 
 #define DEFAULT_THREADS_PER_BLOCK 1024
