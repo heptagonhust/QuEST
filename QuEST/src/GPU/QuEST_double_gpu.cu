@@ -30,6 +30,8 @@ int numMessagesForNCCL;
 long long int maxMessageCountForNCCL;
 /*******************************************************************/
 
+cudaStream_t streamLocal[MAX_STREAM_NUMS];
+
 //cuMPI_Init
 //cuMPI_Allreduce
 //cuMPI_Brcast
@@ -470,10 +472,11 @@ void exchangeStateVectorsSliceAsync(Qureg qureg, int pairRank, int sliceIdx){
   // send my state vector to pairRank's qureg.pairStateVec
   // receive pairRank's state vector into qureg.pairStateVec
   cuMPI_CocurrentStart(pipeComp[sliceIdx]);
-  cuMPI_Complex_Sendrecv(&qureg.stateVec.real[offset], &qureg.stateVec.imag[offset], numMessagesForNCCL, cuMPI_QuEST_REAL, pairRank, TAG,
-          &qureg.pairStateVec.real[offset], &qureg.pairStateVec.imag[offset], numMessagesForNCCL, cuMPI_QuEST_REAL,
+  cuMPI_Complex_Sendrecv(&qureg.stateVec.real[offset], &qureg.stateVec.imag[offset], maxMessageCountForNCCL, cuMPI_QuEST_REAL, pairRank, TAG,
+          &qureg.pairStateVec.real[offset], &qureg.pairStateVec.imag[offset], maxMessageCountForNCCL, cuMPI_QuEST_REAL,
           pairRank, TAG, pipeComp[sliceIdx], &status);
   cuMPI_CocurrentEnd(pipeComp[sliceIdx]);
+  // cudaStreamSynchronize(stream[sliceIdx]);
 }
 
 void exchangeStateVectors(Qureg qureg, int pairRank){
@@ -718,7 +721,7 @@ __global__ void statevec_compactUnitaryDistributedKernel (
 {
 
   int threadsPerCUDABlock, CUDABlocks;
-  threadsPerCUDABlock = 128;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
   CUDABlocks = ceil((qreal)(maxMessageCountForNCCL)/threadsPerCUDABlock);
 
   for (int i = 0; i < numMessagesForNCCL; ++i) {
@@ -877,7 +880,7 @@ __global__ void statevec_controlledCompactUnitaryDistributedKernel (
 {
   
   int threadsPerCUDABlock, CUDABlocks;
-  threadsPerCUDABlock = 128;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
   CUDABlocks = ceil((qreal)(maxMessageCountForNCCL)/threadsPerCUDABlock);
 
   for (int i = 0; i < numMessagesForNCCL; ++i) {
@@ -1063,7 +1066,7 @@ void statevec_pauliXDistributed (Qureg qureg, int pairRank,
 {
   
   int threadsPerCUDABlock, CUDABlocks;
-  threadsPerCUDABlock = 128;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
   CUDABlocks = ceil((qreal)(maxMessageCountForNCCL)/threadsPerCUDABlock);
 
   for (int i = 0; i < numMessagesForNCCL; ++i) {
@@ -1152,7 +1155,7 @@ __global__ void statevec_controlledNotDistributedKernel (
 {
   
   int threadsPerCUDABlock, CUDABlocks;
-  threadsPerCUDABlock = 128;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
   CUDABlocks = ceil((qreal)(maxMessageCountForNCCL)/threadsPerCUDABlock);
   for (int i = 0; i < numMessagesForNCCL; ++i) {
     exchangeStateVectorsSliceAsync(qureg, pairRank, i);
@@ -1252,7 +1255,7 @@ void statevec_pauliYDistributed(Qureg qureg, int pairRank,
 {
   
   int threadsPerCUDABlock, CUDABlocks;
-  threadsPerCUDABlock = 128;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
   CUDABlocks = ceil((qreal)(maxMessageCountForNCCL)/threadsPerCUDABlock);
   for (int i = 0; i < numMessagesForNCCL; ++i) {
     exchangeStateVectorsSliceAsync(qureg, pairRank, i);
@@ -1364,7 +1367,7 @@ void statevec_controlledPauliYDistributed (Qureg qureg, int pairRank, const int 
 {
   
   int threadsPerCUDABlock, CUDABlocks;
-  threadsPerCUDABlock = 128;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
   CUDABlocks = ceil((qreal)(maxMessageCountForNCCL)/threadsPerCUDABlock);
   for (int i = 0; i < numMessagesForNCCL; ++i) {
     exchangeStateVectorsSliceAsync(qureg, pairRank, i);
@@ -1515,7 +1518,7 @@ __global__ void statevec_hadamardDistributedKernel(
 {
   
   int threadsPerCUDABlock, CUDABlocks;
-  threadsPerCUDABlock = 128;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
   CUDABlocks = ceil((qreal)(maxMessageCountForNCCL)/threadsPerCUDABlock);
   for (int i = 0; i < numMessagesForNCCL; ++i) {
     exchangeStateVectorsSliceAsync(qureg, pairRank, i);
@@ -1611,7 +1614,7 @@ struct calcProb{
   // stage 1 done!
   qreal totalProbability = 0.0;
   // int threadsPerCUDABlock, CUDABlocks;
-  // threadsPerCUDABlock = 128;
+  // threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
   // CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
   // statevec_findProbabilityOfZeroDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
   //   qureg.numAmpsPerChunk,
@@ -1935,6 +1938,10 @@ void statevec_createQureg(Qureg *qureg, int numQubits, QuESTEnv env)
     for (int i=0; i<numMessagesForNCCL; i++) {
       stream[i] = cuMPI_NewGlobalComm(&pipeComp[i]);
     }
+    for (int i=0; i<MAX_STREAM_NUMS; i++) {
+      cudaStreamCreateWithFlags(&streamLocal[i], cudaStreamNonBlocking);
+      // cudaStreamCreate(&streamLocal[i]);
+    }
 }
 
 void statevec_destroyQureg(Qureg qureg, QuESTEnv env)
@@ -1982,7 +1989,7 @@ void statevec_initBlankState(Qureg qureg)
   // stage 1 done!
 
   int threadsPerCUDABlock, CUDABlocks;
-  threadsPerCUDABlock = 128;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
   CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
   statevec_initBlankStateKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
       qureg.numAmpsPerChunk, 
@@ -2014,7 +2021,7 @@ void statevec_initZeroState(Qureg qureg)
   if (qureg.chunkId==0) {
 
     int threadsPerCUDABlock, CUDABlocks;
-    threadsPerCUDABlock = 128;
+    threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
     CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
 
     // zero state |0000..0000> has probability 1
@@ -2258,7 +2265,7 @@ void statevec_initPlusState(Qureg qureg)
 
   // initialise the state to |+++..+++> = 1/normFactor {1, 1, 1, ...}
   int threadsPerCUDABlock, CUDABlocks;
-  threadsPerCUDABlock = 128;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
   CUDABlocks = ceil((qreal)(chunkSize)/threadsPerCUDABlock);
   statevec_initPlusStateKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
       chunkSize, 
@@ -2292,7 +2299,7 @@ void statevec_initClassicalState(Qureg qureg, long long int stateInd)
 {
   // stage 1 done!
   int threadsPerCUDABlock, CUDABlocks;
-  threadsPerCUDABlock = 128;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
   CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
 
   // dimension of the state vector

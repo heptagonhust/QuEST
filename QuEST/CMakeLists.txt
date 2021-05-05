@@ -113,7 +113,8 @@ if (GPUACCELERATED)
     if (NOT CUDA_FOUND)
         message(STATUS "CUDA not found. Project will not be built.")
     endif(NOT CUDA_FOUND)
-
+    include(FindCUDA)
+    set( CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS}" "--default-stream per-thread" )
     include_directories(/usr/local/cuda/include ${MPI_INCLUDE_PATH})
 endif()
 
@@ -137,6 +138,7 @@ endif()
 # ----- CUDA FLAGS ------------------------------------------------------------
 
 if (GPUACCELERATED)
+    # set (CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --default-stream per-thread")
     set (CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} \
         -arch=compute_${GPU_COMPUTE_CAPABILITY} -code=sm_${GPU_COMPUTE_CAPABILITY}"
     )
@@ -300,7 +302,7 @@ target_compile_definitions(QuEST
     PRIVATE
     QuEST_PREC=${PRECISION}
 )
-
+# target_compile_options(QuEST PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--default-stream per-thread>) 
 # -----------------------------------------------------------------------------
 # ----- LINK LIBRARY ---------------------------------------------------------
 # -----------------------------------------------------------------------------
