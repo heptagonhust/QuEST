@@ -21,7 +21,16 @@ std::map<cuMPI_Comm, cudaStream_t> comm2stream;
 // #define cuMPI_MAX_AMPS_IN_MSG MPI_MAX_AMPS_IN_MSG
 #define cuMPI_MAX_AMPS_IN_MSG (1LL<<28) // fine-tuned
 
+#define NCCL_COCURRENT_MULTI_PIPE
+// #define NCCL_COCURRENT_TWO_PIPE
+// #define NCCL_NO_COCURRENT
+
+#ifdef NCCL_COCURRENT_MULTI_PIPE
 cuMPI_Comm pipeReal[1000], pipeImag[1000];
+#endif
+#ifdef NCCL_COCURRENT_TWO_PIPE
+cuMPI_Comm pipeReal, pipeImag;
+#endif
 /*******************************************************************/
 
 //cuMPI_Init
@@ -468,6 +477,7 @@ void exchangeStateVectors(Qureg qureg, int pairRank){
   long long int offset;
   // send my state vector to pairRank's qureg.pairStateVec
   // receive pairRank's state vector into qureg.pairStateVec
+  #ifdef NCCL_COCURRENT_MULTI_PIPE
   for (i=0; i<numMessages; i++){
       offset = i*maxMessageCount;
       cuMPI_CocurrentStart(pipeReal[i]);
@@ -487,6 +497,38 @@ void exchangeStateVectors(Qureg qureg, int pairRank){
     cudaStreamSynchronize(comm2stream[pipeReal[i]]);
     cudaStreamSynchronize(comm2stream[pipeImag[i]]);
   }
+  #endif
+  #ifdef NCCL_COCURRENT_TWO_PIPE
+  for (i=0; i<numMessages; i++){
+    offset = i*maxMessageCount;
+    cuMPI_CocurrentStart(pipeReal);
+    cuMPI_Sendrecv(&qureg.stateVec.real[offset], maxMessageCount, cuMPI_QuEST_REAL, pairRank, TAG,
+            &qureg.pairStateVec.real[offset], maxMessageCount, cuMPI_QuEST_REAL,
+            pairRank, TAG, pipeReal, &status);
+    cuMPI_CocurrentEnd(pipeReal);
+    //printf("rank: %d err: %d\n", qureg.rank, err);
+    cuMPI_CocurrentStart(pipeImag);
+    cuMPI_Sendrecv(&qureg.stateVec.imag[offset], maxMessageCount, cuMPI_QuEST_REAL, pairRank, TAG,
+            &qureg.pairStateVec.imag[offset], maxMessageCount, cuMPI_QuEST_REAL,
+            pairRank, TAG, pipeImag, &status);
+    cuMPI_CocurrentEnd(pipeImag);
+  }
+
+  cudaStreamSynchronize(comm2stream[pipeReal]);
+  cudaStreamSynchronize(comm2stream[pipeImag]);
+  #endif
+  #ifdef NCCL_NO_COCURRENT
+  for (i=0; i<numMessages; i++){
+    offset = i*maxMessageCount;
+    cuMPI_Sendrecv(&qureg.stateVec.real[offset], maxMessageCount, cuMPI_QuEST_REAL, pairRank, TAG,
+            &qureg.pairStateVec.real[offset], maxMessageCount, cuMPI_QuEST_REAL,
+            pairRank, TAG, cuMPI_COMM_WORLD, &status);
+    //printf("rank: %d err: %d\n", qureg.rank, err);
+    cuMPI_Sendrecv(&qureg.stateVec.imag[offset], maxMessageCount, cuMPI_QuEST_REAL, pairRank, TAG,
+            &qureg.pairStateVec.imag[offset], maxMessageCount, cuMPI_QuEST_REAL,
+            pairRank, TAG, cuMPI_COMM_WORLD, &status);
+  }
+  #endif
 }
 
 void exchangePairStateVectorHalves(Qureg qureg, int pairRank){
@@ -511,6 +553,7 @@ void exchangePairStateVectorHalves(Qureg qureg, int pairRank){
   long long int offset;
   // send the bottom half of my state vector to the top half of pairRank's qureg.pairStateVec
   // receive pairRank's state vector into the top of qureg.pairStateVec
+  #ifdef NCCL_COCURRENT_MULTI_PIPE
   for (i=0; i<numMessages; i++){
       offset = i*maxMessageCount;
       cuMPI_CocurrentStart(pipeReal[i]);
@@ -532,6 +575,40 @@ void exchangePairStateVectorHalves(Qureg qureg, int pairRank){
     cudaStreamSynchronize(comm2stream[pipeReal[i]]);
     cudaStreamSynchronize(comm2stream[pipeImag[i]]);
   }
+  #endif
+  #ifdef NCCL_COCURRENT_TWO_PIPE
+  for (i=0; i<numMessages; i++){
+    offset = i*maxMessageCount;
+    cuMPI_CocurrentStart(pipeReal);
+    cuMPI_Sendrecv(&qureg.pairStateVec.real[offset+numAmpsToSend], maxMessageCount,
+            cuMPI_QuEST_REAL, pairRank, TAG,
+            &qureg.pairStateVec.real[offset], maxMessageCount, cuMPI_QuEST_REAL,
+            pairRank, TAG, pipeReal, &status);
+    cuMPI_CocurrentEnd(pipeReal);
+
+    //printf("rank: %d err: %d\n", qureg.rank, err);
+    cuMPI_CocurrentStart(pipeImag);
+    cuMPI_Sendrecv(&qureg.pairStateVec.imag[offset+numAmpsToSend], maxMessageCount,
+            cuMPI_QuEST_REAL, pairRank, TAG,
+            &qureg.pairStateVec.imag[offset], maxMessageCount, cuMPI_QuEST_REAL,
+            pairRank, TAG, pipeImag, &status);
+    cuMPI_CocurrentEnd(pipeImag);
+  }
+  cudaStreamSynchronize(comm2stream[pipeReal]);
+  cudaStreamSynchronize(comm2stream[pipeImag]);
+  #endif
+  #ifdef NCCL_NO_COCURRENT
+  for (i=0; i<numMessages; i++){
+    offset = i*maxMessageCount;
+    cuMPI_Sendrecv(&qureg.stateVec.real[offset], maxMessageCount, cuMPI_QuEST_REAL, pairRank, TAG,
+            &qureg.pairStateVec.real[offset], maxMessageCount, cuMPI_QuEST_REAL,
+            pairRank, TAG, cuMPI_COMM_WORLD, &status);
+    //printf("rank: %d err: %d\n", qureg.rank, err);
+    cuMPI_Sendrecv(&qureg.stateVec.imag[offset], maxMessageCount, cuMPI_QuEST_REAL, pairRank, TAG,
+            &qureg.pairStateVec.imag[offset], maxMessageCount, cuMPI_QuEST_REAL,
+            pairRank, TAG, cuMPI_COMM_WORLD, &status);
+  }
+  #endif
 }
 
 //TODO -- decide where this function should go. It is a preparation for MPI data transfer function
@@ -1811,12 +1888,17 @@ void statevec_createQureg(Qureg *qureg, int numQubits, QuESTEnv env)
     // safely assume cuMPI_MAX... = 2^n, so division always exact
     int numMessages = qureg->numAmpsPerChunk/maxMessageCount;
 
+    #ifdef NCCL_COCURRENT_MULTI_PIPE
     int i;
     for (i=0; i<numMessages; i++) {
       cuMPI_NewGlobalComm(&pipeReal[i]);
       cuMPI_NewGlobalComm(&pipeImag[i]);
     }
-
+    #endif
+    #ifdef NCCL_COCURRENT_TWO_PIPE
+    cuMPI_NewGlobalComm(&pipeReal);
+    cuMPI_NewGlobalComm(&pipeImag);
+    #endif
 
 }
 
