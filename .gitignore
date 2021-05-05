@@ -109,3 +109,5 @@ examples/compile_flags.txt
 latex
 .ccls-cache
 html
+
+random/build_gnu/

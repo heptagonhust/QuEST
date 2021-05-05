@@ -26,7 +26,7 @@ std::map<cuMPI_Comm, cudaStream_t> comm2stream;
 // #define NCCL_NO_COCURRENT
 
 #ifdef NCCL_COCURRENT_MULTI_PIPE
-cuMPI_Comm pipeReal[1000], pipeImag[1000];
+cuMPI_Comm pipeReal[1024], pipeImag[1024];
 #endif
 #ifdef NCCL_COCURRENT_TWO_PIPE
 cuMPI_Comm pipeReal, pipeImag;
