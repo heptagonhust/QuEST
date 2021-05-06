@@ -421,10 +421,16 @@ __global__ void statevec_multiControlledTwoQubitUnitaryKernel(Qureg qureg, long 
     long long int ind00, ind01, ind10, ind11;
     ind00 = insertTwoZeroBits(thisTask, q1, q2);
     
+    // the global (between all nodes) index of this node's start index
+    long long int globalIndStart = qureg.chunkId*qureg.numAmpsPerChunk;
+    long long int thisGlobalInd00 = ind00 + globalIndStart;
+
+    // skip amplitude if controls aren't in 1 state (overloaded for speed)
     // modify only if control qubits are 1 for this state
-    if (ctrlMask && (ctrlMask&ind00) != ctrlMask)
+    if (ctrlMask && ((ctrlMask & thisGlobalInd00) != ctrlMask))
         return;
     
+    // inds of |..0..1..>, |..1..0..> and |..1..1..>
     ind01 = flipBit(ind00, q1);
     ind10 = flipBit(ind00, q2);
     ind11 = flipBit(ind01, q2);
@@ -485,6 +491,9 @@ __global__ void statevec_multiControlledTwoQubitUnitaryKernel(Qureg qureg, long 
 
 void statevec_multiControlledTwoQubitUnitaryLocal(Qureg qureg, long long int ctrlMask, const int q1, const int q2, ComplexMatrix4 u)
 {
+    // stage 1 done!
+    // chunkId done!
+
     int threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
     int CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>2)/threadsPerCUDABlock); // one kernel eval for every 4 amplitudes
     statevec_multiControlledTwoQubitUnitaryKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg, ctrlMask, q1, q2, argifyMatrix4(u));

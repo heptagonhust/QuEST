@@ -1808,6 +1808,7 @@ void statevec_swapQubitAmps(Qureg qureg, int qb1, int qb2) {
  */
  void statevec_multiControlledTwoQubitUnitary(Qureg qureg, long long int ctrlMask, const int q1, const int q2, ComplexMatrix4 u) {
 
+  // stage 1 done!
   //!!simple return in cpu_local 
 
   int q1FitsInNode = halfMatrixBlockFitsInChunk(qureg.numAmpsPerChunk, q1);
