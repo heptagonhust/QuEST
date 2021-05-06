@@ -1744,24 +1744,6 @@ struct calcProb{
   }
 };
 
-// __global__ void statevec_findProbabilityOfZeroDistributedKernel (
-//   const long long int chunkSize,
-//   qreal *stateVecReal,
-//   qreal *stateVecImag,
-//   qreal *totalProbability // ----- measured probability
-// ) {
-//   // ----- temp variables
-//   long long int thisTask = blockIdx.x*blockDim.x + threadIdx.x; // task based approach for expose loop with small granularity
-//   const long long int numTasks = chunkSize;
-//   if (thisTask>=numTasks) return;
-
-//   // ---------------------------------------------------------------- //
-//   //            find probability                                      //
-//   // ---------------------------------------------------------------- //
-
-//   atomicAdd(totalProbability, stateVecReal[thisTask]*stateVecReal[thisTask]
-//           + stateVecImag[thisTask]*stateVecImag[thisTask]);
-// }
 
 /** Measure the probability of a specified qubit being in the zero state across all amplitudes held in this chunk.
  * Size of regions to skip is a multiple of chunkSize.
@@ -1773,16 +1755,6 @@ struct calcProb{
  qreal statevec_findProbabilityOfZeroDistributed (Qureg qureg) {
   // stage 1 done!
   qreal totalProbability = 0.0;
-  // int threadsPerCUDABlock, CUDABlocks;
-  // threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
-  // CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
-  // statevec_findProbabilityOfZeroDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
-  //   qureg.numAmpsPerChunk,
-  //   qureg.stateVec.real,
-  //   qureg.stateVec.imag,
-  //   &totalProbability
-  // );
-
   thrust::device_vector<int> d_idx(qureg.numAmpsPerChunk);
   thrust::sequence(d_idx.begin(), d_idx.end());
   calcProb unary_op(qureg.stateVec.real, qureg.stateVec.imag);
