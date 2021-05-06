@@ -41,6 +41,353 @@ void swapDouble(qreal **a, qreal **b){
 extern "C" {
 #endif
 
+//
+// Derived from old single GPU version
+// i.e. compared with CPU version, these functions only exist
+// in QuEST_cpu.c, not in QuEST_cpu_local.c, and there are no
+// related `*Local`-suffix functions for them.
+//
+
+__global__ void statevec_initDebugStateKernel(long long int stateVecSize, qreal *stateVecReal, qreal *stateVecImag){
+  long long int index;
+
+  index = blockIdx.x*blockDim.x + threadIdx.x;
+  if (index>=stateVecSize) return;
+
+  stateVecReal[index] = (index*2.0)/10.0;
+  stateVecImag[index] = (index*2.0+1.0)/10.0;
+}
+
+void statevec_initDebugState(Qureg qureg)
+{
+  int threadsPerCUDABlock, CUDABlocks;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
+  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
+  statevec_initDebugStateKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
+      qureg.numAmpsPerChunk,
+      qureg.stateVec.real, 
+      qureg.stateVec.imag);
+}
+
+
+__global__ void statevec_initStateOfSingleQubitKernel(long long int stateVecSize, qreal *stateVecReal, qreal *stateVecImag, int qubitId, int outcome){
+  long long int index;
+  int bit;
+
+  index = blockIdx.x*blockDim.x + threadIdx.x;
+  if (index>=stateVecSize) return;
+
+  qreal normFactor = 1.0/sqrt((qreal)stateVecSize/2);
+  bit = extractBit(qubitId, index);
+  if (bit==outcome) {
+      stateVecReal[index] = normFactor;
+      stateVecImag[index] = 0.0;
+  } else {
+      stateVecReal[index] = 0.0;
+      stateVecImag[index] = 0.0;
+  }
+}
+
+void statevec_initStateOfSingleQubit(Qureg *qureg, int qubitId, int outcome)
+{
+  int threadsPerCUDABlock, CUDABlocks;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
+  CUDABlocks = ceil((qreal)(qureg->numAmpsPerChunk)/threadsPerCUDABlock);
+  statevec_initStateOfSingleQubitKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg->numAmpsPerChunk, qureg->stateVec.real, qureg->stateVec.imag, qubitId, outcome);
+}
+
+
+int statevec_compareStates(Qureg mq1, Qureg mq2, qreal precision){
+  qreal diff;
+  int chunkSize = mq1.numAmpsPerChunk;
+
+  copyStateFromGPU(mq1);
+  copyStateFromGPU(mq2);
+
+  for (int i=0; i<chunkSize; i++){
+      diff = mq1.stateVec.real[i] - mq2.stateVec.real[i];
+      if (diff<0) diff *= -1;
+      if (diff>precision) return 0;
+      diff = mq1.stateVec.imag[i] - mq2.stateVec.imag[i];
+      if (diff<0) diff *= -1;
+      if (diff>precision) return 0;
+  }
+  return 1;
+}
+
+
+__global__ void statevec_phaseShiftByTermKernel(Qureg qureg, const int targetQubit, qreal cosAngle, qreal sinAngle) {
+  // stage 1 done!
+
+  // !only for single gpu
+  // long long int sizeBlock, sizeHalfBlock, thisBlock;
+  // long long int indexUp, indexLo;
+
+  qreal stateRealLo, stateImagLo;
+  long long int thisTask, exactTask; // exactTask is global rank for distributed gpu.
+  // const long long int numTasks = qureg.numAmpsPerChunk >> 1; // !only for single gpu
+  const long long int numTasks = qureg.numAmpsPerChunk;
+
+  // distributed gpu
+  const long long int sizeChunk = qureg.numAmpsPerChunk;
+  const long long int chunkId = qureg.chunkId;
+
+  /* yh comment */
+  /* sizeHalfBlock & sizeBlock using binary count trick
+      e.g. qubit num = 3, target qubit = 1 (id begin with 0)
+      000, 001 the center bit (qubit1) is 0 occur continuously for 2 times
+      010, 011 when the center bit is 1, the next related bit(#) will add sizeBlock(=4) to index
+      100, 101
+      #110, 111
+  */
+  // !only for single gpu
+  // sizeHalfBlock = 1LL << targetQubit;
+  // sizeBlock     = 2LL * sizeHalfBlock;
+
+  qreal *stateVecReal = qureg.stateVec.real;
+  qreal *stateVecImag = qureg.stateVec.imag;
+
+  // thisTask = blockIdx.x*blockDim.x + threadIdx.x;
+  // if (thisTask>=numTasks) return;
+  // thisBlock   = thisTask / sizeHalfBlock;
+  // indexUp     = thisBlock*sizeBlock + thisTask%sizeHalfBlock;
+  // indexLo     = indexUp + sizeHalfBlock;
+  
+  thisTask = blockIdx.x*blockDim.x + threadIdx.x;
+  if (thisTask>=numTasks) return;
+  exactTask = thisTask + chunkId*sizeChunk;
+
+  if ( extractBit(targetQubit, exactTask) ) {
+      
+      stateRealLo = stateVecReal[thisTask];
+      stateImagLo = stateVecImag[thisTask];
+
+      stateVecReal[thisTask] = cosAngle*stateRealLo - sinAngle*stateImagLo;
+      stateVecImag[thisTask] = sinAngle*stateRealLo + cosAngle*stateImagLo;
+  }
+}
+
+void statevec_phaseShiftByTerm(Qureg qureg, const int targetQubit, Complex term)
+{   
+  // stage 1 done!
+  // chunkId done!
+  
+  qreal cosAngle = term.real;
+  qreal sinAngle = term.imag;
+  
+  int threadsPerCUDABlock, CUDABlocks;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
+  
+  // CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);
+  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
+  statevec_phaseShiftByTermKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg, targetQubit, cosAngle, sinAngle);
+}
+
+
+__global__ void statevec_controlledPhaseShiftKernel(Qureg qureg, const int idQubit1, const int idQubit2, qreal cosAngle, qreal sinAngle)
+{
+  long long int index;
+  long long int stateVecSize;
+  int bit1, bit2;
+  qreal stateRealLo, stateImagLo;
+
+  stateVecSize = qureg.numAmpsPerChunk;
+  qreal *stateVecReal = qureg.stateVec.real;
+  qreal *stateVecImag = qureg.stateVec.imag;
+
+  index = blockIdx.x*blockDim.x + threadIdx.x;
+  if (index>=stateVecSize) return;
+
+  bit1 = extractBit (idQubit1, index);
+  bit2 = extractBit (idQubit2, index);
+  if (bit1 && bit2) {
+      stateRealLo = stateVecReal[index];
+      stateImagLo = stateVecImag[index];
+      
+      stateVecReal[index] = cosAngle*stateRealLo - sinAngle*stateImagLo;
+      stateVecImag[index] = sinAngle*stateRealLo + cosAngle*stateImagLo;
+  }
+}
+
+void statevec_controlledPhaseShift(Qureg qureg, const int idQubit1, const int idQubit2, qreal angle)
+{
+  qreal cosAngle = cos(angle);
+  qreal sinAngle = sin(angle);
+  
+  int threadsPerCUDABlock, CUDABlocks;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
+  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
+  statevec_controlledPhaseShiftKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg, idQubit1, idQubit2, cosAngle, sinAngle);
+}
+
+
+__global__ void statevec_multiControlledPhaseShiftKernel(Qureg qureg, long long int mask, qreal cosAngle, qreal sinAngle) {
+  qreal stateRealLo, stateImagLo;
+  long long int index;
+  long long int stateVecSize;
+
+  stateVecSize = qureg.numAmpsPerChunk;
+  qreal *stateVecReal = qureg.stateVec.real;
+  qreal *stateVecImag = qureg.stateVec.imag;
+  
+  index = blockIdx.x*blockDim.x + threadIdx.x;
+  if (index>=stateVecSize) return;
+
+  if (mask == (mask & index) ){
+      stateRealLo = stateVecReal[index];
+      stateImagLo = stateVecImag[index];
+      stateVecReal[index] = cosAngle*stateRealLo - sinAngle*stateImagLo;
+      stateVecImag[index] = sinAngle*stateRealLo + cosAngle*stateImagLo;
+  }
+}
+
+void statevec_multiControlledPhaseShift(Qureg qureg, int *controlQubits, int numControlQubits, qreal angle)
+{   
+  qreal cosAngle = cos(angle);
+  qreal sinAngle = sin(angle);
+
+  long long int mask = getQubitBitMask(controlQubits, numControlQubits);
+      
+  int threadsPerCUDABlock, CUDABlocks;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
+  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
+  statevec_multiControlledPhaseShiftKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg, mask, cosAngle, sinAngle);
+}
+
+
+__global__ void statevec_multiRotateZKernel(Qureg qureg, long long int mask, qreal cosAngle, qreal sinAngle) {
+  
+  long long int stateVecSize = qureg.numAmpsPerChunk;
+  long long int index = blockIdx.x*blockDim.x + threadIdx.x;
+  if (index>=stateVecSize) return;
+  
+  qreal *stateVecReal = qureg.stateVec.real;
+  qreal *stateVecImag = qureg.stateVec.imag;
+  
+  int fac = getBitMaskParity(mask & index)? -1 : 1;
+  qreal stateReal = stateVecReal[index];
+  qreal stateImag = stateVecImag[index];
+  
+  stateVecReal[index] = cosAngle*stateReal + fac * sinAngle*stateImag;
+  stateVecImag[index] = - fac * sinAngle*stateReal + cosAngle*stateImag;  
+}
+
+void statevec_multiRotateZ(Qureg qureg, long long int mask, qreal angle)
+{   
+  qreal cosAngle = cos(angle/2.0);
+  qreal sinAngle = sin(angle/2.0);
+      
+  int threadsPerCUDABlock, CUDABlocks;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
+  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
+  statevec_multiRotateZKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg, mask, cosAngle, sinAngle);
+}
+
+
+__global__ void statevec_controlledPhaseFlipKernel(Qureg qureg, const int idQubit1, const int idQubit2)
+{
+    long long int index;
+    long long int stateVecSize;
+    int bit1, bit2;
+
+    stateVecSize = qureg.numAmpsPerChunk;
+    qreal *stateVecReal = qureg.stateVec.real;
+    qreal *stateVecImag = qureg.stateVec.imag;
+
+    index = blockIdx.x*blockDim.x + threadIdx.x;
+    if (index>=stateVecSize) return;
+
+    bit1 = extractBit (idQubit1, index);
+    bit2 = extractBit (idQubit2, index);
+    if (bit1 && bit2) {
+        stateVecReal [index] = - stateVecReal [index];
+        stateVecImag [index] = - stateVecImag [index];
+    }
+}
+
+void statevec_controlledPhaseFlip(Qureg qureg, const int idQubit1, const int idQubit2)
+{
+    int threadsPerCUDABlock, CUDABlocks;
+    threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
+    CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
+    statevec_controlledPhaseFlipKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg, idQubit1, idQubit2);
+}
+
+
+__global__ void statevec_multiControlledPhaseFlipKernel(Qureg qureg, long long int mask)
+{
+    long long int index;
+    long long int stateVecSize;
+
+    stateVecSize = qureg.numAmpsPerChunk;
+    qreal *stateVecReal = qureg.stateVec.real;
+    qreal *stateVecImag = qureg.stateVec.imag;
+
+    index = blockIdx.x*blockDim.x + threadIdx.x;
+    if (index>=stateVecSize) return;
+
+    if (mask == (mask & index) ){
+        stateVecReal [index] = - stateVecReal [index];
+        stateVecImag [index] = - stateVecImag [index];
+    }
+}
+
+void statevec_multiControlledPhaseFlip(Qureg qureg, int *controlQubits, int numControlQubits)
+{
+    int threadsPerCUDABlock, CUDABlocks;
+    long long int mask = getQubitBitMask(controlQubits, numControlQubits);
+    threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
+    CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
+    statevec_multiControlledPhaseFlipKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg, mask);
+}
+
+
+__global__ void statevec_setWeightedQuregKernel(Complex fac1, Qureg qureg1, Complex fac2, Qureg qureg2, Complex facOut, Qureg out) {
+
+  long long int ampInd = blockIdx.x*blockDim.x + threadIdx.x;
+  long long int numAmpsToVisit = qureg1.numAmpsPerChunk;
+  if (ampInd >= numAmpsToVisit) return;
+
+  qreal *vecRe1 = qureg1.stateVec.real;
+  qreal *vecIm1 = qureg1.stateVec.imag;
+  qreal *vecRe2 = qureg2.stateVec.real;
+  qreal *vecIm2 = qureg2.stateVec.imag;
+  qreal *vecReOut = out.stateVec.real;
+  qreal *vecImOut = out.stateVec.imag;
+
+  qreal facRe1 = fac1.real; 
+  qreal facIm1 = fac1.imag;
+  qreal facRe2 = fac2.real;
+  qreal facIm2 = fac2.imag;
+  qreal facReOut = facOut.real;
+  qreal facImOut = facOut.imag;
+
+  qreal re1,im1, re2,im2, reOut,imOut;
+  long long int index = ampInd;
+
+  re1 = vecRe1[index]; im1 = vecIm1[index];
+  re2 = vecRe2[index]; im2 = vecIm2[index];
+  reOut = vecReOut[index];
+  imOut = vecImOut[index];
+
+  vecReOut[index] = (facReOut*reOut - facImOut*imOut) + (facRe1*re1 - facIm1*im1) + (facRe2*re2 - facIm2*im2);
+  vecImOut[index] = (facReOut*imOut + facImOut*reOut) + (facRe1*im1 + facIm1*re1) + (facRe2*im2 + facIm2*re2);
+}
+
+void statevec_setWeightedQureg(Complex fac1, Qureg qureg1, Complex fac2, Qureg qureg2, Complex facOut, Qureg out) {
+
+  long long int numAmpsToVisit = qureg1.numAmpsPerChunk;
+
+  int threadsPerCUDABlock, CUDABlocks;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
+  CUDABlocks = ceil(numAmpsToVisit / (qreal) threadsPerCUDABlock);
+  statevec_setWeightedQuregKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
+      fac1, qureg1, fac2, qureg2, facOut, out
+  );
+}
+
+
+
 // densmatr
 void densmatr_initPureState(Qureg targetQureg, Qureg copyQureg){}
 void densmatr_initPlusState(Qureg qureg){}

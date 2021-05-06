@@ -504,6 +504,6 @@ inline int densityMatrixBlockFitsInChunk(long long int chunkSize, int numQubits,
 
 
 #define DEFAULT_THREADS_PER_BLOCK 1024
-
+#define NOT_USED_AT_ALL
 
 #endif
