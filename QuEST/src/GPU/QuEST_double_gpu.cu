@@ -1678,7 +1678,7 @@ void statevec_collapseToKnownProbOutcomeDistributedRenorm (Qureg qureg, const in
 void statevec_collapseToKnownProbOutcome(Qureg qureg, const int measureQubit, int outcome, qreal totalStateProb)
 {
   // stage 1 done!
-  
+
   //!!simple return in cpu_local
 
   int skipValuesWithinRank = halfMatrixBlockFitsInChunk(qureg.numAmpsPerChunk, measureQubit);
@@ -1728,31 +1728,57 @@ void seedQuESTDefault(){
   init_by_array(key, 2);
 }
 
-/** returns -1 if this node contains no amplitudes where qb1 and qb2
- * have opposite parity, otherwise returns the global index of one
- * of such contained amplitudes (not necessarily the first)
+
+__global__ void statevec_swapQubitAmpsDistributedKernel(
+  Qureg qureg, int pairRank, int qb1, int qb2) {
+    
+  // can't use qureg.stateVec as a private OMP var
+  qreal *reVec = qureg.stateVec.real;
+  qreal *imVec = qureg.stateVec.imag;
+  qreal *rePairVec = qureg.pairStateVec.real;
+  qreal *imPairVec = qureg.pairStateVec.imag;
+  
+  long long int numLocalAmps = qureg.numAmpsPerChunk;
+  long long int globalStartInd = qureg.chunkId * numLocalAmps;
+  long long int pairGlobalStartInd = pairRank * numLocalAmps;
+
+  long long int localInd = blockIdx.x*blockDim.x + threadIdx.x;
+  if (localInd>=numLocalAmps) return;
+
+  long long int globalInd;
+  long long int pairLocalInd, pairGlobalInd;
+      
+  globalInd = globalStartInd + localInd;
+  if (isOddParity(globalInd, qb1, qb2)) {
+      
+      pairGlobalInd = flipBit(flipBit(globalInd, qb1), qb2);
+      pairLocalInd = pairGlobalInd - pairGlobalStartInd;
+      
+      reVec[localInd] = rePairVec[pairLocalInd];
+      imVec[localInd] = imPairVec[pairLocalInd];
+  }
+}
+
+/** qureg.pairStateVec contains the entire set of amplitudes of the paired node
+ * which includes the set of all amplitudes which need to be swapped between
+ * |..0..1..> and |..1..0..>
  */
- long long int getGlobalIndOfOddParityInChunk(Qureg qureg, int qb1, int qb2) {
-  long long int chunkStartInd = qureg.numAmpsPerChunk * qureg.chunkId;
-  long long int chunkEndInd = chunkStartInd + qureg.numAmpsPerChunk; // exclusive
-  long long int oddParityInd;
-
-  if (extractBitOnCPU(qb1, chunkStartInd) != extractBitOnCPU(qb2, chunkStartInd))
-      return chunkStartInd;
-
-  oddParityInd = flipBitOnCPU(chunkStartInd, qb1);
-  if (oddParityInd >= chunkStartInd && oddParityInd < chunkEndInd)
-      return oddParityInd;
-
-  oddParityInd = flipBitOnCPU(chunkStartInd, qb2);
-  if (oddParityInd >= chunkStartInd && oddParityInd < chunkEndInd)
-      return oddParityInd;
-
-  return -1;
+ void statevec_swapQubitAmpsDistributed(Qureg qureg, int pairRank, int qb1, int qb2) {
+    
+  int threadsPerCUDABlock, CUDABlocks;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
+  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
+  statevec_swapQubitAmpsDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
+    qureg, 
+    pairRank, 
+    qb1, 
+    qb2
+  );
 }
 
 void statevec_swapQubitAmps(Qureg qureg, int qb1, int qb2) {
 
+  // stage 1 done!
   //!!simple return in cpu_local
 
   // perform locally if possible

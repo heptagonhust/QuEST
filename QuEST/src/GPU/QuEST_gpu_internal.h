@@ -78,9 +78,9 @@ inline int maskContainsBitOnCPU(long long int mask, int bitInd) {
   return mask & (1LL << bitInd);
 }
 
-// inline int isOddParityOnCPU(long long int number, int qb1, int qb2) {
-//     return extractBitOnCPU(qb1, number) != extractBitOnCPU(qb2, number);
-// }
+inline int isOddParityOnCPU(long long int number, int qb1, int qb2) {
+  return extractBitOnCPU(qb1, number) != extractBitOnCPU(qb2, number);
+}
 
 // inline long long int insertZeroBitOnCPU(long long int number, int index) {
 //     long long int left, right;
@@ -160,6 +160,9 @@ __forceinline__ __device__ long long int insertZeroBits(long long int number, in
    return number;
 }
 
+ __forceinline__ __device__ int isOddParity(long long int number, int qb1, int qb2) {
+  return extractBit(qb1, number) != extractBit(qb2, number);
+}
 
 /* None side-effects Functions only for numerical calculation */
 
@@ -311,7 +314,7 @@ qreal densmatr_calcInnerProduct(Qureg a, Qureg b);
 //         ComplexArray stateVecLo,
 //         ComplexArray stateVecOut);
 // void statevec_collapseToKnownProbOutcomeDistributedRenorm (Qureg qureg, const int measureQubit, const qreal totalProbability);
-void statevec_swapQubitAmpsDistributed(Qureg qureg, int pairRank, int qb1, int qb2);
+// void statevec_swapQubitAmpsDistributed(Qureg qureg, int pairRank, int qb1, int qb2);
 
 #define DEFAULT_THREADS_PER_BLOCK 1024
 
@@ -476,6 +479,29 @@ inline int getChunkOuterBlockPairIdForPart3(int chunkIsUpperSmallerQubit, int ch
      int bitToCheck = chunkId & numChunksToSkip;
      return bitToCheck;
  }
+
+/** returns -1 if this node contains no amplitudes where qb1 and qb2
+ * have opposite parity, otherwise returns the global index of one
+ * of such contained amplitudes (not necessarily the first)
+ */
+inline long long int getGlobalIndOfOddParityInChunk(Qureg qureg, int qb1, int qb2) {
+  long long int chunkStartInd = qureg.numAmpsPerChunk * qureg.chunkId;
+  long long int chunkEndInd = chunkStartInd + qureg.numAmpsPerChunk; // exclusive
+  long long int oddParityInd;
+
+  if (extractBitOnCPU(qb1, chunkStartInd) != extractBitOnCPU(qb2, chunkStartInd))
+      return chunkStartInd;
+
+  oddParityInd = flipBitOnCPU(chunkStartInd, qb1);
+  if (oddParityInd >= chunkStartInd && oddParityInd < chunkEndInd)
+      return oddParityInd;
+
+  oddParityInd = flipBitOnCPU(chunkStartInd, qb2);
+  if (oddParityInd >= chunkStartInd && oddParityInd < chunkEndInd)
+      return oddParityInd;
+
+  return -1;
+}
 
 
 // For densmatr

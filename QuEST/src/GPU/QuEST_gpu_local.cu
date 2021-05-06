@@ -1073,6 +1073,9 @@ __global__ void statevec_swapQubitAmpsKernel(Qureg qureg, int qb1, int qb2) {
 
 void statevec_swapQubitAmpsLocal(Qureg qureg, int qb1, int qb2) 
 {
+    // stage 1 done!
+    // chunkId done!
+    
     int threadsPerCUDABlock, CUDABlocks;
     threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
     CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>2)/threadsPerCUDABlock);
