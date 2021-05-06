@@ -78,14 +78,14 @@ qreal densmatr_calcInnerProduct(Qureg a, Qureg b){return (qreal)0;}
 //         ComplexArray stateVecUp,
 //         ComplexArray stateVecLo,
 //         ComplexArray stateVecOut){}
-void statevec_multiControlledUnitaryDistributed (
-        Qureg qureg, 
-        const int targetQubit, 
-        long long int ctrlQubitsMask, long long int ctrlFlipMask,
-        Complex rot1, Complex rot2,
-        ComplexArray stateVecUp,
-        ComplexArray stateVecLo,
-        ComplexArray stateVecOut){}
+// void statevec_multiControlledUnitaryDistributed (
+//         Qureg qureg, 
+//         const int targetQubit, 
+//         long long int ctrlQubitsMask, long long int ctrlFlipMask,
+//         Complex rot1, Complex rot2,
+//         ComplexArray stateVecUp,
+//         ComplexArray stateVecLo,
+//         ComplexArray stateVecOut){}
 void statevec_collapseToKnownProbOutcomeDistributedRenorm (Qureg qureg, const int measureQubit, const qreal totalProbability){}
 void statevec_swapQubitAmpsDistributed(Qureg qureg, int pairRank, int qb1, int qb2){}
 void statevec_collapseToOutcomeDistributedSetZero(Qureg qureg){}

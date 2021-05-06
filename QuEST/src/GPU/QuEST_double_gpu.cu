@@ -1108,9 +1108,89 @@ void statevec_controlledUnitary(Qureg qureg, const int controlQubit, const int t
   }
 }
 
-void statevec_multiControlledUnitary(Qureg qureg, long long int ctrlQubitsMask, long long int ctrlFlipMask, const int targetQubit, ComplexMatrix2 u)
+
+__global__ void statevec_multiControlledUnitaryDistributedKernel (
+  Qureg qureg, 
+  const int targetQubit, 
+  long long int ctrlQubitsMask, long long int ctrlFlipMask,
+  Complex rot1, Complex rot2,
+  ComplexArray stateVecUp,
+  ComplexArray stateVecLo,
+  ComplexArray stateVecOut)
 {
 
+  qreal   stateRealUp,stateRealLo,stateImagUp,stateImagLo;
+  long long int thisTask = blockIdx.x*blockDim.x + threadIdx.x;  
+  const long long int numTasks=qureg.numAmpsPerChunk;
+  const long long int chunkSize=qureg.numAmpsPerChunk;
+  const long long int chunkId=qureg.chunkId;
+
+  if (thisTask>=numTasks) return;
+
+  qreal rot1Real=rot1.real, rot1Imag=rot1.imag;
+  qreal rot2Real=rot2.real, rot2Imag=rot2.imag;
+  qreal *stateVecRealUp=stateVecUp.real, *stateVecImagUp=stateVecUp.imag;
+  qreal *stateVecRealLo=stateVecLo.real, *stateVecImagLo=stateVecLo.imag;
+  qreal *stateVecRealOut=stateVecOut.real, *stateVecImagOut=stateVecOut.imag;
+
+  if (ctrlQubitsMask == (ctrlQubitsMask & ((thisTask+chunkId*chunkSize) ^ ctrlFlipMask))) {
+      // store current state vector values in temp variables
+      stateRealUp = stateVecRealUp[thisTask];
+      stateImagUp = stateVecImagUp[thisTask];
+
+      stateRealLo = stateVecRealLo[thisTask];
+      stateImagLo = stateVecImagLo[thisTask];
+
+      stateVecRealOut[thisTask] = rot1Real*stateRealUp - rot1Imag*stateImagUp 
+          + rot2Real*stateRealLo - rot2Imag*stateImagLo;
+      stateVecImagOut[thisTask] = rot1Real*stateImagUp + rot1Imag*stateRealUp 
+          + rot2Real*stateImagLo + rot2Imag*stateRealLo;
+  }
+}
+
+
+/** Apply a unitary operation to a single qubit in the state vector of probability amplitudes, given
+ *  a subset of the state vector with upper and lower block values 
+ stored seperately. Only perform the rotation where all the control qubits are 1.
+ *                                                 
+ *  @param[in,out] qureg object representing the set of qubits
+ *  @param[in] targetQubit qubit to rotate
+ *  @param[in] ctrlQubitsMask a bit mask indicating whether each qubit is a control (1) or not (0)
+ *  @param[in] ctrlFlipMask a bit mask indicating whether each qubit (only controls are relevant)
+ *             should be flipped when checking the control condition
+ *  @param[in] rot1 rotation angle
+ *  @param[in] rot2 rotation angle
+ *  @param[in] stateVecUp probability amplitudes in upper half of a block
+ *  @param[in] stateVecLo probability amplitudes in lower half of a block
+ *  @param[out] stateVecOut array section to update (will correspond to either the lower or upper half of a block)
+ */
+ void statevec_multiControlledUnitaryDistributed (
+  Qureg qureg, 
+  const int targetQubit, 
+  long long int ctrlQubitsMask, long long int ctrlFlipMask,
+  Complex rot1, Complex rot2,
+  ComplexArray stateVecUp,
+  ComplexArray stateVecLo,
+  ComplexArray stateVecOut)
+{
+
+  int threadsPerCUDABlock, CUDABlocks;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
+  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
+  statevec_multiControlledUnitaryDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
+    qureg, 
+    targetQubit, 
+    ctrlQubitsMask, ctrlFlipMask,
+    rot1, rot2,
+    stateVecUp,
+    stateVecLo,
+    stateVecOut);
+}
+
+
+void statevec_multiControlledUnitary(Qureg qureg, long long int ctrlQubitsMask, long long int ctrlFlipMask, const int targetQubit, ComplexMatrix2 u)
+{
+  // stage 1 done!
   //!!simple in local_cpu
 
   // flag to require memory exchange. 1: an entire block fits on one rank, 0: at most half a block fits on one rank

@@ -579,6 +579,8 @@ __global__ void statevec_multiControlledUnitaryKernel(
     // ----- temp variables
     long long int thisTask;                                   // task based approach for expose loop with small granularity
     const long long int numTasks=qureg.numAmpsPerChunk>>1;
+    const long long int chunkSize=qureg.numAmpsPerChunk;
+    const long long int chunkId=qureg.chunkId;
 
 
     sizeHalfBlock = 1LL << targetQubit;                               // size of blocks halved
@@ -599,7 +601,7 @@ __global__ void statevec_multiControlledUnitaryKernel(
     indexUp     = thisBlock*sizeBlock + thisTask%sizeHalfBlock;
     indexLo     = indexUp + sizeHalfBlock;
 
-    if (ctrlQubitsMask == (ctrlQubitsMask & (indexUp ^ ctrlFlipMask))) {
+    if (ctrlQubitsMask == (ctrlQubitsMask & ((indexUp+chunkId*chunkSize) ^ ctrlFlipMask))) {
         // store current state vector values in temp variables
         stateRealUp = stateVecReal[indexUp];
         stateImagUp = stateVecImag[indexUp];
@@ -627,6 +629,8 @@ void statevec_multiControlledUnitaryLocal(
     const int targetQubit, ComplexMatrix2 u
 ){
     // stage 1 done!
+    // chunkId done!
+    
     int threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
     int CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);
     statevec_multiControlledUnitaryKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
