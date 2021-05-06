@@ -2014,44 +2014,12 @@ void statevec_destroyQureg(Qureg qureg, QuESTEnv env)
     // ? cudaFree(qureg.firstLevelReduction.real);
 }
 
-__global__ void statevec_initBlankStateKernel(long long int stateVecSize, qreal *stateVecReal, qreal *stateVecImag){
-  long long int index;
-
-  // initialise the statevector to be all-zeros
-  index = blockIdx.x*blockDim.x + threadIdx.x;
-  if (index>=stateVecSize) return;
-  stateVecReal[index] = 0.0;
-  stateVecImag[index] = 0.0;
-}
-
 void statevec_initBlankState(Qureg qureg)
 {
   // stage 1 done!
 
-  int threadsPerCUDABlock, CUDABlocks;
-  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
-  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
-  statevec_initBlankStateKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
-      qureg.numAmpsPerChunk, 
-      qureg.stateVec.real, 
-      qureg.stateVec.imag);
-}
-
-// especially for qureg.chunkId == 0
-__global__ void statevec_initZeroStateKernel(long long int stateVecSize, qreal *stateVecReal, qreal *stateVecImag){
-  long long int index;
-
-  // initialise the state to |0000..0000>
-  index = blockIdx.x*blockDim.x + threadIdx.x;
-  if (index>=stateVecSize) return;
-  stateVecReal[index] = 0.0;
-  stateVecImag[index] = 0.0;
-
-  if (index==0){
-      // zero state |0000..0000> has probability 1
-      stateVecReal[0] = 1.0;
-      stateVecImag[0] = 0.0;
-  }
+  cudaMemset(qureg.stateVec.real, 0, qureg.numAmpsPerChunk * sizeof(qreal));
+  cudaMemset(qureg.stateVec.imag, 0, qureg.numAmpsPerChunk * sizeof(qreal));
 }
 
 void statevec_initZeroState(Qureg qureg)
@@ -2060,16 +2028,12 @@ void statevec_initZeroState(Qureg qureg)
 
   if (qureg.chunkId==0) {
 
-    int threadsPerCUDABlock, CUDABlocks;
-    threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
-    CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
+    cudaMemset(qureg.stateVec.real, 0, qureg.numAmpsPerChunk * sizeof(qreal));
+    cudaMemset(qureg.stateVec.imag, 0, qureg.numAmpsPerChunk * sizeof(qreal));
 
     // zero state |0000..0000> has probability 1
-    statevec_initZeroStateKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
-      qureg.numAmpsPerChunk, 
-      qureg.stateVec.real, 
-      qureg.stateVec.imag
-    );
+    qreal tmp = 1.0;
+    cudaMemcpy(qureg.stateVec.real, &tmp, 1 * sizeof(qreal), cudaMemcpyHostToDevice);
   } else {
 
     statevec_initBlankState(qureg);
