@@ -301,11 +301,17 @@ __global__ void statevec_multiControlledMultiQubitUnitaryKernel(
     long long int numTasks = qureg.numAmpsPerChunk >> numTargs; // kernel called on every 1 in 2^numTargs amplitudes
     if (thisTask>=numTasks) return;
     
+    // the global (between all nodes) index of this node's start index
+    long long int globalIndStart = qureg.chunkId*qureg.numAmpsPerChunk;
+    long long int thisGlobalInd00; // the global (between all nodes) index of this thread's |..0..0..> state
+
+    // this thread's index of |..0..0..> (target qubits = 0)
     // find this task's start index (where all targs are 0)
     long long int ind00 = insertZeroBits(thisTask, targs, numTargs);
     
     // this task only modifies amplitudes if control qubits are 1 for this state
-    if (ctrlMask && (ctrlMask&ind00) != ctrlMask)
+    thisGlobalInd00 = ind00 + globalIndStart;
+    if (ctrlMask && ((ctrlMask & thisGlobalInd00) != ctrlMask))
         return;
         
     qreal *reVec = qureg.stateVec.real;
@@ -352,6 +358,9 @@ __global__ void statevec_multiControlledMultiQubitUnitaryKernel(
 
 void statevec_multiControlledMultiQubitUnitaryLocal(Qureg qureg, long long int ctrlMask, int* targs, const int numTargs, ComplexMatrixN u)
 {
+    // stage 1 done!
+    // chunkId done!
+    
     int threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
     int CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>numTargs)/threadsPerCUDABlock);
     

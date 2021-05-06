@@ -1850,6 +1850,8 @@ void statevec_swapQubitAmps(Qureg qureg, int qb1, int qb2) {
  */
  void statevec_multiControlledMultiQubitUnitary(Qureg qureg, long long int ctrlMask, int* targs, const int numTargs, ComplexMatrixN u) {
 
+  // stage 1 done!
+  
   //!!simple return in cpu_local
   // only these functions are related to gpu process:
   // statevec_swapQubitAmps()
