@@ -111,3 +111,5 @@ latex
 html
 
 random/build_gnu/
+probs.dat
+stateVector.dat

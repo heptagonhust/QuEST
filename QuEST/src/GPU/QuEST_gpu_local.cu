@@ -89,7 +89,7 @@ int statevec_compareStates(Qureg mq1, Qureg mq2, qreal precision){
     return 1;
 }
 
-__global__ void statevec_compactUnitaryKernel (Qureg qureg, const int sliceIdx, const long long int sliceOffset, const int rotQubit, Complex alpha, Complex beta){
+__global__ void statevec_compactUnitaryKernel (Qureg qureg, const int rotQubit, Complex alpha, Complex beta){
     // ----- sizes
     long long int sizeBlock,                                           // size of blocks
          sizeHalfBlock;                                       // size of blocks halved
@@ -101,7 +101,7 @@ __global__ void statevec_compactUnitaryKernel (Qureg qureg, const int sliceIdx, 
     qreal   stateRealUp,stateRealLo,                             // storage for previous state values
            stateImagUp,stateImagLo;                             // (used in updates)
     // ----- temp variables
-    long long int exactKernelIdx, thisTask;                                   // task based approach for expose loop with small granularity
+    long long int thisTask;                                   // task based approach for expose loop with small granularity
     const long long int numTasks=qureg.numAmpsPerChunk>>1;
 
     sizeHalfBlock = 1LL << rotQubit;                               // size of blocks halved
@@ -117,9 +117,8 @@ __global__ void statevec_compactUnitaryKernel (Qureg qureg, const int sliceIdx, 
     qreal alphaImag=alpha.imag, alphaReal=alpha.real;
     qreal betaImag=beta.imag, betaReal=beta.real;
 
-    exactKernelIdx = blockIdx.x*blockDim.x + threadIdx.x;
-    thisTask = exactKernelIdx + sliceIdx*sliceOffset;
-    if (exactKernelIdx >= sliceOffset || thisTask>=numTasks) return;
+    thisTask = blockIdx.x*blockDim.x + threadIdx.x;
+    if (thisTask>=numTasks) return;
 
     thisBlock   = thisTask / sizeHalfBlock;
     indexUp     = thisBlock*sizeBlock + thisTask%sizeHalfBlock;
@@ -147,22 +146,16 @@ __global__ void statevec_compactUnitaryKernel (Qureg qureg, const int sliceIdx, 
 
 void statevec_compactUnitaryLocal(Qureg qureg, const int targetQubit, Complex alpha, Complex beta) 
 {
-    // stage 2 done!
     // stage 1 done!
     // chunkID done!
 
-    long long int offset = (qureg.numAmpsPerChunk>>1)/MAX_STREAM_NUMS;
     int threadsPerCUDABlock, CUDABlocks;
     threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
-    CUDABlocks = ceil((qreal)(offset)/threadsPerCUDABlock);
-    cudaDeviceSynchronize();
-    for (int i = 0; i < MAX_STREAM_NUMS; ++i) {
-        statevec_compactUnitaryKernel<<<CUDABlocks, threadsPerCUDABlock, 0, streamLocal[i]>>>(
-            qureg, i, offset, targetQubit, alpha, beta);
-    }
+    CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);
+    statevec_compactUnitaryKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg, targetQubit, alpha, beta);
 }
 
-__global__ void statevec_controlledCompactUnitaryKernel (Qureg qureg, const int sliceIdx, const long long int sliceOffset, const int controlQubit, const int targetQubit, Complex alpha, Complex beta){
+__global__ void statevec_controlledCompactUnitaryKernel (Qureg qureg, const int controlQubit, const int targetQubit, Complex alpha, Complex beta){
     // ----- sizes
     long long int sizeBlock,                                           // size of blocks
          sizeHalfBlock;                                       // size of blocks halved
@@ -174,7 +167,7 @@ __global__ void statevec_controlledCompactUnitaryKernel (Qureg qureg, const int 
     qreal   stateRealUp,stateRealLo,                             // storage for previous state values
            stateImagUp,stateImagLo;                             // (used in updates)
     // ----- temp variables
-    long long int exactKernelIdx, thisTask;                                   // task based approach for expose loop with small granularity
+    long long int thisTask;                                   // task based approach for expose loop with small granularity
     const long long int numTasks=qureg.numAmpsPerChunk>>1;
     const long long int chunkSize=qureg.numAmpsPerChunk;
     const long long int chunkId=qureg.chunkId;
@@ -193,9 +186,8 @@ __global__ void statevec_controlledCompactUnitaryKernel (Qureg qureg, const int 
     qreal alphaImag=alpha.imag, alphaReal=alpha.real;
     qreal betaImag=beta.imag, betaReal=beta.real;
 
-    exactKernelIdx = blockIdx.x*blockDim.x + threadIdx.x;
-    thisTask = exactKernelIdx + sliceIdx*sliceOffset;
-    if (exactKernelIdx >= sliceOffset || thisTask>=numTasks) return;
+    thisTask = blockIdx.x*blockDim.x + threadIdx.x;
+    if (thisTask>=numTasks) return;
 
     thisBlock   = thisTask / sizeHalfBlock;
     indexUp     = thisBlock*sizeBlock + thisTask%sizeHalfBlock;
@@ -226,20 +218,13 @@ __global__ void statevec_controlledCompactUnitaryKernel (Qureg qureg, const int 
 
 void statevec_controlledCompactUnitaryLocal(Qureg qureg, const int controlQubit, const int targetQubit, Complex alpha, Complex beta) 
 {
-    // stage 2 done!
     // stage 1 done!
     // chunkID done!
 
-    // MAX_STREAM_NUMS is 2^n, so the devision is exact.
-    long long int offset = (qureg.numAmpsPerChunk>>1)/MAX_STREAM_NUMS;
     int threadsPerCUDABlock, CUDABlocks;
     threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
-    CUDABlocks = ceil((qreal)(offset)/threadsPerCUDABlock);
-    cudaDeviceSynchronize();
-    for (int i = 0; i < MAX_STREAM_NUMS; ++i) {
-    statevec_controlledCompactUnitaryKernel<<<CUDABlocks, threadsPerCUDABlock, 0, streamLocal[i]>>>(
-        qureg, i, offset, controlQubit, targetQubit, alpha, beta);
-    }
+    CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);
+    statevec_controlledCompactUnitaryKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg, controlQubit, targetQubit, alpha, beta);
 }
 
 __global__ void statevec_unitaryKernel(Qureg qureg, const int targetQubit, ArgMatrix2 u){

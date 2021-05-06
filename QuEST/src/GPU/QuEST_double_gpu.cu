@@ -30,8 +30,6 @@ int numMessagesForNCCL;
 long long int maxMessageCountForNCCL;
 /*******************************************************************/
 
-cudaStream_t streamLocal[MAX_STREAM_NUMS];
-
 //cuMPI_Init
 //cuMPI_Allreduce
 //cuMPI_Brcast
@@ -741,6 +739,9 @@ __global__ void statevec_compactUnitaryDistributedKernel (
       stateVecLo, //lower
       stateVecOut); //output  
   }  
+  for (int i = 0; i < numMessagesForNCCL; ++i) {
+    cudaStreamSynchronize(stream[i]);
+  }
 }
 
 void statevec_compactUnitary(Qureg qureg, const int targetQubit, Complex alpha, Complex beta)
@@ -902,6 +903,9 @@ __global__ void statevec_controlledCompactUnitaryDistributedKernel (
       stateVecLo,
       stateVecOut
     );
+  }
+  for (int i = 0; i < numMessagesForNCCL; ++i) {
+    cudaStreamSynchronize(stream[i]);
   }
 }
 
@@ -1079,6 +1083,9 @@ void statevec_pauliXDistributed (Qureg qureg, int pairRank,
     statevec_pauliXDistributedKernel<<<CUDABlocks, threadsPerCUDABlock, 0, stream[i]>>>(
       i, maxMessageCountForNCCL, qureg.numAmpsPerChunk, stateVecIn, stateVecOut);
   }
+  for (int i = 0; i < numMessagesForNCCL; ++i) {
+    cudaStreamSynchronize(stream[i]);
+  }
 }
 
 void statevec_pauliX(Qureg qureg, const int targetQubit)
@@ -1173,6 +1180,9 @@ __global__ void statevec_controlledNotDistributedKernel (
       stateVecIn, 
       stateVecOut
     );
+  }
+  for (int i = 0; i < numMessagesForNCCL; ++i) {
+    cudaStreamSynchronize(stream[i]);
   }
 } 
 
@@ -1273,6 +1283,9 @@ void statevec_pauliYDistributed(Qureg qureg, int pairRank,
       updateUpper, 
       conjFac
     );
+  }
+  for (int i = 0; i < numMessagesForNCCL; ++i) {
+    cudaStreamSynchronize(stream[i]);
   }
 }
 
@@ -1386,6 +1399,9 @@ void statevec_controlledPauliYDistributed (Qureg qureg, int pairRank, const int 
       stateVecOut,
       conjFac
     );
+  }
+  for (int i = 0; i < numMessagesForNCCL; ++i) {
+    cudaStreamSynchronize(stream[i]);
   }
 } 
 
@@ -1535,6 +1551,9 @@ __global__ void statevec_hadamardDistributedKernel(
       stateVecLo, //lower
       stateVecOut, updateUpper //output
     );
+  }
+  for (int i = 0; i < numMessagesForNCCL; ++i) {
+    cudaStreamSynchronize(stream[i]);
   }
 }
 
@@ -1942,10 +1961,6 @@ void statevec_createQureg(Qureg *qureg, int numQubits, QuESTEnv env)
     calcNumMessagesForNCCL(qureg);
     for (int i=0; i<numMessagesForNCCL; i++) {
       stream[i] = cuMPI_NewGlobalComm(&pipeComp[i]);
-    }
-    for (int i=0; i<MAX_STREAM_NUMS; i++) {
-      // cudaStreamCreateWithFlags(&streamLocal[i], cudaStreamNonBlocking);
-      cudaStreamCreate(&streamLocal[i]);
     }
 }
 

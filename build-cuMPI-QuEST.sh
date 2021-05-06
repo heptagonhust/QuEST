@@ -1,6 +1,8 @@
 TARGET_NODE=icu02
 NCCL_SOCKET_IFNAME=ib0
 
+rm -rf ~/demo ~/qft
+
 cd QuEST/src/GPU/cuMPI
 if [ -d "build" ]; then 
   rm -rf build
@@ -41,3 +43,7 @@ make -j16
 \cp -f demo ~
 
 cd ../../
+
+rm -rf QuEST/src/GPU/cuMPI/build
+rm -rf GHZ_QFT/build
+rm -rf random/build
