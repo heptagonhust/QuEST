@@ -779,7 +779,7 @@ void statevec_compactUnitary(Qureg qureg, const int targetQubit, Complex alpha, 
 }
 
 
-__global__ void statevec_unitaryDistributed (
+__global__ void statevec_unitaryDistributedKernel (
   const long long int chunkSize,
   Complex rot1, Complex rot2,
   ComplexArray stateVecUp,
