@@ -137,19 +137,6 @@ qreal statevec_calcTotalProb(Qureg qureg){
   return ret;
 }
 
-static int isChunkToSkipInFindPZero(int chunkId, long long int chunkSize, int measureQubit);
-static int chunkIsUpper(int chunkId, long long int chunkSize, int targetQubit);
-static int chunkIsUpperInOuterBlock(int chunkId, long long int chunkSize, int targetQubit, int numQubits);
-static void getRotAngle(int chunkIsUpper, Complex *rot1, Complex *rot2, Complex alpha, Complex beta);
-static int getChunkPairId(int chunkIsUpper, int chunkId, long long int chunkSize, int targetQubit);
-static int getChunkOuterBlockPairId(int chunkIsUpper, int chunkId, long long int chunkSize, int targetQubit, int numQubits);
-static int halfMatrixBlockFitsInChunk(long long int chunkSize, int targetQubit);
-static int getChunkIdFromIndex(Qureg qureg, long long int index);
-
-static int getChunkIdFromIndex(Qureg qureg, long long int index){
-  return index/qureg.numAmpsPerChunk; // this is numAmpsPerChunk
-}
-
 int GPUExists(void){
   // stage 1 done! need to integrate to cuMPI, and explict set certain device.
 
@@ -300,159 +287,6 @@ qreal statevec_getImagAmp(Qureg qureg, long long int index){
 
 
 /** Unmodified part derived from distributed cpu version **/
-
-
-/** Returns whether a given chunk in position chunkId is in the upper or lower half of
-  a block.
- *
- * @param[in] chunkId id of chunk in state vector
- * @param[in] chunkSize number of amps in chunk
- * @param[in] targetQubit qubit being rotated
- * @return 1: chunk is in upper half of block, 0: chunk is in lower half of block
- */
-//! fix -- is this the same as isChunkToSkip?
-static int chunkIsUpper(int chunkId, long long int chunkSize, int targetQubit)
-{
-    long long int sizeHalfBlock = 1LL << (targetQubit);
-    long long int sizeBlock = sizeHalfBlock*2;
-    long long int posInBlock = (chunkId*chunkSize) % sizeBlock;
-    return posInBlock<sizeHalfBlock;
-}
-
-//! fix -- do with masking instead
-static int chunkIsUpperInOuterBlock(int chunkId, long long int chunkSize, int targetQubit, int numQubits)
-{
-    long long int sizeOuterHalfBlock = 1LL << (targetQubit+numQubits);
-    long long int sizeOuterBlock = sizeOuterHalfBlock*2;
-    long long int posInBlock = (chunkId*chunkSize) % sizeOuterBlock;
-    return posInBlock<sizeOuterHalfBlock;
-}
-
-/** Get rotation values for a given chunk
- * @param[in] chunkIsUpper 1: chunk is in upper half of block, 0: chunk is in lower half
- *
- * @param[out] rot1, rot2 rotation values to use, allocated for upper/lower such that
- * @verbatim
- stateUpper = rot1 * stateUpper + conj(rot2)  * stateLower
- @endverbatim
- * or
- * @verbatim
- stateLower = rot1 * stateUpper + conj(rot2)  * stateLower
- @endverbatim
- *
- * @param[in] alpha, beta initial rotation values
- */
-static void getRotAngle(int chunkIsUpper, Complex *rot1, Complex *rot2, Complex alpha, Complex beta)
-{
-    if (chunkIsUpper){
-        *rot1=alpha;
-        rot2->real=-beta.real;
-        rot2->imag=-beta.imag;
-    } else {
-        *rot1=beta;
-        *rot2=alpha;
-    }
-}
-
-/** Get rotation values for a given chunk given a unitary matrix
- * @param[in] chunkIsUpper 1: chunk is in upper half of block, 0: chunk is in lower half
- *
- * @param[out] rot1, rot2 rotation values to use, allocated for upper/lower such that
- * @verbatim
- stateUpper = rot1 * stateUpper + conj(rot2)  * stateLower
- @endverbatim
- * or
- * @verbatim
- stateLower = rot1 * stateUpper + conj(rot2)  * stateLower
- @endverbatim
- * @param[in] u unitary matrix operation
- */
-static void getRotAngleFromUnitaryMatrix(int chunkIsUpper, Complex *rot1, Complex *rot2, ComplexMatrix2 u)
-{
-    if (chunkIsUpper){
-        *rot1=(Complex) {.real=u.real[0][0], .imag=u.imag[0][0]};
-        *rot2=(Complex) {.real=u.real[0][1], .imag=u.imag[0][1]};
-    } else {
-        *rot1=(Complex) {.real=u.real[1][0], .imag=u.imag[1][0]};
-        *rot2=(Complex) {.real=u.real[1][1], .imag=u.imag[1][1]};
-    }
-}
-
-/** get position of corresponding chunk, holding values required to
- * update values in my chunk (with chunkId) when rotating targetQubit.
- *
- * @param[in] chunkIsUpper 1: chunk is in upper half of block, 0: chunk is in lower half
- * @param[in] chunkId id of chunk in state vector
- * @param[in] chunkSize number of amps in chunk
- * @param[in] targetQubit qubit being rotated
- * @return chunkId of chunk required to rotate targetQubit
- */
-static int getChunkPairId(int chunkIsUpper, int chunkId, long long int chunkSize, int targetQubit)
-{
-    long long int sizeHalfBlock = 1LL << (targetQubit);
-    int chunksPerHalfBlock = sizeHalfBlock/chunkSize;
-    if (chunkIsUpper){
-        return chunkId + chunksPerHalfBlock;
-    } else {
-        return chunkId - chunksPerHalfBlock;
-    }
-}
-
-static int getChunkOuterBlockPairId(int chunkIsUpper, int chunkId, long long int chunkSize, int targetQubit, int numQubits)
-{
-    long long int sizeOuterHalfBlock = 1LL << (targetQubit+numQubits);
-    int chunksPerOuterHalfBlock = sizeOuterHalfBlock/chunkSize;
-    if (chunkIsUpper){
-        return chunkId + chunksPerOuterHalfBlock;
-    } else {
-        return chunkId - chunksPerOuterHalfBlock;
-    }
-}
-
-static int getChunkOuterBlockPairIdForPart3(int chunkIsUpperSmallerQubit, int chunkIsUpperBiggerQubit, int chunkId,
-        long long int chunkSize, int smallerQubit, int biggerQubit, int numQubits)
-{
-    long long int sizeOuterHalfBlockBiggerQubit = 1LL << (biggerQubit+numQubits);
-    long long int sizeOuterHalfBlockSmallerQubit = 1LL << (smallerQubit+numQubits);
-    int chunksPerOuterHalfBlockSmallerQubit = sizeOuterHalfBlockSmallerQubit/chunkSize;
-    int chunksPerOuterHalfBlockBiggerQubit = sizeOuterHalfBlockBiggerQubit/chunkSize;
-    int rank;
-    if (chunkIsUpperBiggerQubit){
-        rank = chunkId + chunksPerOuterHalfBlockBiggerQubit;
-    } else {
-        rank = chunkId - chunksPerOuterHalfBlockBiggerQubit;
-    }
-
-    if (chunkIsUpperSmallerQubit){
-        rank = rank + chunksPerOuterHalfBlockSmallerQubit;
-    } else {
-        rank = rank - chunksPerOuterHalfBlockSmallerQubit;
-    }
-
-    return rank;
-}
-
-/** return whether the current qubit rotation will use
- * blocks that fit within a single chunk.
- *
- * @param[in] chunkSize number of amps in chunk
- * @param[in] targetQubit qubit being rotated
- * @return 1: one chunk fits in one block 0: chunk is larger than block
- */
-//! fix -- this should be renamed to matrixBlockFitsInChunk
-static int halfMatrixBlockFitsInChunk(long long int chunkSize, int targetQubit)
-{
-    long long int sizeHalfBlock = 1LL << (targetQubit);
-    if (chunkSize > sizeHalfBlock) return 1;
-    else return 0;
-}
-
-static int densityMatrixBlockFitsInChunk(long long int chunkSize, int numQubits, int targetQubit) {
-    long long int sizeOuterHalfBlock = 1LL << (targetQubit+numQubits);
-    if (chunkSize > sizeOuterHalfBlock) return 1;
-    else return 0;
-}
-
 
 
 void exchangeStateVectors(Qureg qureg, int pairRank){
@@ -834,11 +668,11 @@ __global__ void statevec_unitaryDistributedKernel (
   threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
   CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
   statevec_unitaryDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
-    qureg,
+    qureg.numAmpsPerChunk,
     rot1, rot2,
     stateVecUp,
     stateVecLo,
-    stateVecOut)
+    stateVecOut);
 }
 
 
@@ -1744,7 +1578,6 @@ struct calcProb{
   }
 };
 
-
 /** Measure the probability of a specified qubit being in the zero state across all amplitudes held in this chunk.
  * Size of regions to skip is a multiple of chunkSize.
  * The results are communicated and aggregated by the caller
@@ -1763,26 +1596,6 @@ struct calcProb{
   totalProbability = thrust::transform_reduce(d_idx.begin(), d_idx.end(), unary_op, init, binary_op);
   return totalProbability;
 }
-
-
-/** Find chunks to skip when calculating probability of qubit being zero.
- * When calculating probability of a bit q being zero,
- * sum up 2^q values, then skip 2^q values, etc. This function finds if an entire chunk
- * is in the range of values to be skipped
- *
- * @param[in] chunkId id of chunk in state vector
- * @param[in] chunkSize number of amps in chunk
- * @param[in] measureQubi qubit being measured
- * @return int -- 1: skip, 0: don't skip
- */
- static int isChunkToSkipInFindPZero(int chunkId, long long int chunkSize, int measureQubit)
- {
-     long long int sizeHalfBlock = 1LL << (measureQubit);
-     int numChunksToSkip = sizeHalfBlock/chunkSize;
-     // calculate probability by summing over numChunksToSkip, then skipping numChunksToSkip, etc
-     int bitToCheck = chunkId & numChunksToSkip;
-     return bitToCheck;
- }
 
 qreal statevec_calcProbOfOutcome(Qureg qureg, const int measureQubit, int outcome)
 {
