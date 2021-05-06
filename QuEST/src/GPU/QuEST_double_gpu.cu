@@ -1630,8 +1630,55 @@ qreal statevec_calcProbOfOutcome(Qureg qureg, const int measureQubit, int outcom
   return h_totalStateProb;
 }
 
+
+
+__global__ void statevec_collapseToKnownProbOutcomeDistributedRenormKernel(
+  Qureg qureg, const int measureQubit, const qreal totalProbability)
+{
+  // ----- temp variables
+  long long int thisTask = blockIdx.x*blockDim.x + threadIdx.x;
+  long long int numTasks=qureg.numAmpsPerChunk;
+  
+  if (thisTask>=numTasks) return;
+
+  qreal renorm=1/sqrt(totalProbability);
+
+  qreal *stateVecReal = qureg.stateVec.real;
+  qreal *stateVecImag = qureg.stateVec.imag;
+
+  stateVecReal[thisTask] = stateVecReal[thisTask]*renorm;
+  stateVecImag[thisTask] = stateVecImag[thisTask]*renorm;
+}
+
+/** Renormalise parts of the state vector where measureQubit=0 or 1, based on the total probability of that qubit being
+ *  in state 0 or 1.
+ *  Measure in Zero performs an irreversible change to the state vector: it updates the vector according
+ *  to the event that the value 'outcome' has been measured on the qubit indicated by measureQubit (where 
+ *  this label starts from 0, of course). It achieves this by setting all inconsistent amplitudes to 0 and 
+ *  then renormalising based on the total probability of measuring measureQubit=0 if outcome=0 and
+ *  measureQubit=1 if outcome=1.
+ *  In the distributed version, one block (with measureQubit=0 in the first half of the block and
+ *  measureQubit=1 in the second half of the block) is spread over multiple chunks, meaning that each chunks performs
+ *  only renormalisation or only setting amplitudes to 0. This function handles the renormalisation.
+ *  
+ *  @param[in,out] qureg object representing the set of qubits
+ *  @param[in] measureQubit qubit to measure
+ *  @param[in] totalProbability probability of qubit measureQubit being zero
+ */
+void statevec_collapseToKnownProbOutcomeDistributedRenorm (Qureg qureg, const int measureQubit, const qreal totalProbability)
+{
+  // stage 1 done!
+  int threadsPerCUDABlock, CUDABlocks;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
+  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
+  statevec_collapseToKnownProbOutcomeDistributedRenormKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
+    qureg, measureQubit, totalProbability);
+}
+
 void statevec_collapseToKnownProbOutcome(Qureg qureg, const int measureQubit, int outcome, qreal totalStateProb)
 {
+  // stage 1 done!
+  
   //!!simple return in cpu_local
 
   int skipValuesWithinRank = halfMatrixBlockFitsInChunk(qureg.numAmpsPerChunk, measureQubit);
@@ -1642,12 +1689,18 @@ void statevec_collapseToKnownProbOutcome(Qureg qureg, const int measureQubit, in
       // chunk has amps for q=0
       if (outcome==0) statevec_collapseToKnownProbOutcomeDistributedRenorm(qureg, measureQubit,
               totalStateProb);
-      else statevec_collapseToOutcomeDistributedSetZero(qureg);
+      else {
+        cudaMemset(qureg.stateVec.real, 0, qureg.numAmpsPerChunk * sizeof(qreal));
+        cudaMemset(qureg.stateVec.imag, 0, qureg.numAmpsPerChunk * sizeof(qreal));
+      }
     } else {
         // chunk has amps for q=1
       if (outcome==1) statevec_collapseToKnownProbOutcomeDistributedRenorm(qureg, measureQubit,
               totalStateProb);
-      else statevec_collapseToOutcomeDistributedSetZero(qureg);
+      else {
+        cudaMemset(qureg.stateVec.real, 0, qureg.numAmpsPerChunk * sizeof(qreal));
+        cudaMemset(qureg.stateVec.imag, 0, qureg.numAmpsPerChunk * sizeof(qreal));
+      }
     }
   }
 }

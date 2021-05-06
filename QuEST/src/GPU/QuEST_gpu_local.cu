@@ -1495,7 +1495,10 @@ __global__ void statevec_collapseToKnownProbOutcomeKernel(Qureg qureg, int measu
  * else the state-vector will lose normalisation
  */
 void statevec_collapseToKnownProbOutcomeLocal(Qureg qureg, const int measureQubit, int outcome, qreal outcomeProb)
-{        
+{
+    // stage 1 done!
+    // chunkId done!
+    
     int threadsPerCUDABlock, CUDABlocks;
     threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
     CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);

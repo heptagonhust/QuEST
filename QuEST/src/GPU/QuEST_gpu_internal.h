@@ -310,9 +310,8 @@ qreal densmatr_calcInnerProduct(Qureg a, Qureg b);
 //         ComplexArray stateVecUp,
 //         ComplexArray stateVecLo,
 //         ComplexArray stateVecOut);
-void statevec_collapseToKnownProbOutcomeDistributedRenorm (Qureg qureg, const int measureQubit, const qreal totalProbability);
+// void statevec_collapseToKnownProbOutcomeDistributedRenorm (Qureg qureg, const int measureQubit, const qreal totalProbability);
 void statevec_swapQubitAmpsDistributed(Qureg qureg, int pairRank, int qb1, int qb2);
-void statevec_collapseToOutcomeDistributedSetZero(Qureg qureg);
 
 #define DEFAULT_THREADS_PER_BLOCK 1024
 
