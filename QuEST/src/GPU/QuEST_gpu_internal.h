@@ -261,7 +261,6 @@ void statevec_controlledPauliYConjLocal(Qureg qureg, const int controlQubit, con
 void statevec_hadamardLocal(Qureg qureg, const int targetQubit);
 qreal statevec_findProbabilityOfZeroLocal(Qureg qureg, const int measureQubit);
 
-// TODO
 void statevec_collapseToKnownProbOutcomeLocal(Qureg qureg, const int measureQubit, int outcome, qreal outcomeProb);
 void statevec_swapQubitAmpsLocal(Qureg qureg, int qb1, int qb2);
 void statevec_multiControlledTwoQubitUnitaryLocal(Qureg qureg, long long int ctrlMask, const int q1, const int q2, ComplexMatrix4 u);
@@ -293,30 +292,6 @@ qreal densmatr_calcInnerProduct(Qureg a, Qureg b);
 #ifdef __cplusplus
 }
 #endif
-
-// TODO
-// void statevec_unitaryDistributed (Qureg qureg,
-//         Complex rot1, Complex rot2,
-//         ComplexArray stateVecUp,
-//         ComplexArray stateVecLo,
-//         ComplexArray stateVecOut);
-// void statevec_controlledUnitaryDistributed (Qureg qureg, const int controlQubit,
-//         Complex rot1, Complex rot2,
-//         ComplexArray stateVecUp,
-//         ComplexArray stateVecLo,
-//         ComplexArray stateVecOut);
-// void statevec_multiControlledUnitaryDistributed (
-//         Qureg qureg, 
-//         const int targetQubit, 
-//         long long int ctrlQubitsMask, long long int ctrlFlipMask,
-//         Complex rot1, Complex rot2,
-//         ComplexArray stateVecUp,
-//         ComplexArray stateVecLo,
-//         ComplexArray stateVecOut);
-// void statevec_collapseToKnownProbOutcomeDistributedRenorm (Qureg qureg, const int measureQubit, const qreal totalProbability);
-// void statevec_swapQubitAmpsDistributed(Qureg qureg, int pairRank, int qb1, int qb2);
-
-#define DEFAULT_THREADS_PER_BLOCK 1024
 
 
 
@@ -526,6 +501,9 @@ inline int densityMatrixBlockFitsInChunk(long long int chunkSize, int numQubits,
     if (chunkSize > sizeOuterHalfBlock) return 1;
     else return 0;
 }
+
+
+#define DEFAULT_THREADS_PER_BLOCK 1024
 
 
 #endif
