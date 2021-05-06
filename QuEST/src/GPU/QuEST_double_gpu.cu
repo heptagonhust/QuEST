@@ -834,11 +834,11 @@ __global__ void statevec_unitaryDistributedKernel (
   threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
   CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
   statevec_unitaryDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
-    qureg.numAmpsPerChunk,
-    rot1,rot2,
-    qureg.stateVec, //upper
-    qureg.pairStateVec, //lower
-    qureg.stateVec); //output
+    qureg,
+    rot1, rot2,
+    stateVecUp,
+    stateVecLo,
+    stateVecOut)
 }
 
 
@@ -1059,10 +1059,11 @@ __global__ void statevec_controlledUnitaryDistributedKernel (Qureg qureg, const 
   threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
   CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
   statevec_controlledUnitaryDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
-    qureg,controlQubit,rot1,rot2,
-    qureg.pairStateVec, //upper
-    qureg.stateVec, //lower
-    qureg.stateVec); //output
+    qureg, controlQubit,
+    rot1, rot2,
+    stateVecUp,
+    stateVecLo,
+    stateVecOut);
 }
 
 
