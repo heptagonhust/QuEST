@@ -316,4 +316,6 @@ void statevec_collapseToKnownProbOutcomeDistributedRenorm (Qureg qureg, const in
 void statevec_swapQubitAmpsDistributed(Qureg qureg, int pairRank, int qb1, int qb2);
 void statevec_collapseToOutcomeDistributedSetZero(Qureg qureg);
 
+#define DEFAULT_THREADS_PER_BLOCK 1024
+
 #endif

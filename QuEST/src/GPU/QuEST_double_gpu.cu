@@ -725,9 +725,9 @@ __global__ void statevec_compactUnitaryDistributedKernel (
   ComplexArray stateVecLo,
   ComplexArray stateVecOut)
 {
-  assert(isReadyOnGPU(qureg));
+  
   int threadsPerCUDABlock, CUDABlocks;
-  threadsPerCUDABlock = 128;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
   CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
   statevec_compactUnitaryDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
     qureg.numAmpsPerChunk,
@@ -778,8 +778,73 @@ void statevec_compactUnitary(Qureg qureg, const int targetQubit, Complex alpha, 
   }
 }
 
+
+__global__ void statevec_unitaryDistributed (
+  const long long int chunkSize,
+  Complex rot1, Complex rot2,
+  ComplexArray stateVecUp,
+  ComplexArray stateVecLo,
+  ComplexArray stateVecOut)
+{
+  qreal   stateRealUp,stateRealLo,stateImagUp,stateImagLo;
+  long long int thisTask = blockIdx.x*blockDim.x + threadIdx.x;;  
+  const long long int numTasks=chunkSize;
+
+  if (thisTask>=numTasks) return;
+
+  qreal rot1Real=rot1.real, rot1Imag=rot1.imag;
+  qreal rot2Real=rot2.real, rot2Imag=rot2.imag;
+  qreal *stateVecRealUp=stateVecUp.real, *stateVecImagUp=stateVecUp.imag;
+  qreal *stateVecRealLo=stateVecLo.real, *stateVecImagLo=stateVecLo.imag;
+  qreal *stateVecRealOut=stateVecOut.real, *stateVecImagOut=stateVecOut.imag;
+
+  // store current state vector values in temp variables
+  stateRealUp = stateVecRealUp[thisTask];
+  stateImagUp = stateVecImagUp[thisTask];
+
+  stateRealLo = stateVecRealLo[thisTask];
+  stateImagLo = stateVecImagLo[thisTask];
+
+  stateVecRealOut[thisTask] = rot1Real*stateRealUp - rot1Imag*stateImagUp 
+      + rot2Real*stateRealLo - rot2Imag*stateImagLo;
+  stateVecImagOut[thisTask] = rot1Real*stateImagUp + rot1Imag*stateRealUp 
+      + rot2Real*stateImagLo + rot2Imag*stateRealLo;
+}
+
+/** Apply a unitary operation to a single qubit
+ *  given a subset of the state vector with upper and lower block values 
+ * stored seperately.
+ *
+ *  @remarks Qubits are zero-based and the first qubit is the rightmost                  
+ *                                                                        
+ *  @param[in,out] qureg object representing the set of qubits
+ *  @param[in] u unitary matrix to apply
+ *  @param[in] stateVecUp probability amplitudes in upper half of a block
+ *  @param[in] stateVecLo probability amplitudes in lower half of a block
+ *  @param[out] stateVecOut array section to update (will correspond to either the lower or upper half of a block)
+ */
+ void statevec_unitaryDistributed (Qureg qureg,
+  Complex rot1, Complex rot2,
+  ComplexArray stateVecUp,
+  ComplexArray stateVecLo,
+  ComplexArray stateVecOut)
+{
+
+  int threadsPerCUDABlock, CUDABlocks;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
+  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
+  statevec_unitaryDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
+    qureg.numAmpsPerChunk,
+    rot1,rot2,
+    qureg.stateVec, //upper
+    qureg.pairStateVec, //lower
+    qureg.stateVec); //output
+}
+
+
 void statevec_unitary(Qureg qureg, const int targetQubit, ComplexMatrix2 u)
 {
+  // stage 1 done!
   // !!simple in local_cpu
 
   // flag to require memory exchange. 1: an entire block fits on one rank, 0: at most half a block fits on one rank
@@ -874,9 +939,9 @@ __global__ void statevec_controlledCompactUnitaryDistributedKernel (
   ComplexArray stateVecLo,
   ComplexArray stateVecOut)
 {
-  assert(isReadyOnGPU(qureg));
+  
   int threadsPerCUDABlock, CUDABlocks;
-  threadsPerCUDABlock = 128;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
   CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
   statevec_controlledCompactUnitaryDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
     qureg.numAmpsPerChunk,
@@ -1050,9 +1115,9 @@ void statevec_pauliXDistributed (Qureg qureg,
         ComplexArray stateVecIn,
         ComplexArray stateVecOut)
 {
-  assert(isReadyOnGPU(qureg));
+  
   int threadsPerCUDABlock, CUDABlocks;
-  threadsPerCUDABlock = 128;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
   CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
   statevec_pauliXDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg.numAmpsPerChunk, stateVecIn, stateVecOut);
 }
@@ -1131,9 +1196,9 @@ __global__ void statevec_controlledNotDistributedKernel (
   ComplexArray stateVecIn,
   ComplexArray stateVecOut)
 {
-  assert(isReadyOnGPU(qureg));
+  
   int threadsPerCUDABlock, CUDABlocks;
-  threadsPerCUDABlock = 128;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
   CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
   statevec_controlledNotDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
     qureg.numAmpsPerChunk, 
@@ -1222,9 +1287,9 @@ void statevec_pauliYDistributed(Qureg qureg,
         ComplexArray stateVecOut,
         int updateUpper, const int conjFac)
 {
-  assert(isReadyOnGPU(qureg));
+  
   int threadsPerCUDABlock, CUDABlocks;
-  threadsPerCUDABlock = 128;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
   CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
   statevec_pauliYDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
     qureg.numAmpsPerChunk, 
@@ -1325,9 +1390,9 @@ void statevec_controlledPauliYDistributed (Qureg qureg, const int controlQubit,
   ComplexArray stateVecIn,
   ComplexArray stateVecOut, const int conjFac)
 {
-  assert(isReadyOnGPU(qureg));
+  
   int threadsPerCUDABlock, CUDABlocks;
-  threadsPerCUDABlock = 128;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
   CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
   statevec_controlledPauliYDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
     qureg.numAmpsPerChunk, 
@@ -1467,9 +1532,9 @@ __global__ void statevec_hadamardDistributedKernel(
   ComplexArray stateVecOut,
   int updateUpper)
 {
-  assert(isReadyOnGPU(qureg));
+  
   int threadsPerCUDABlock, CUDABlocks;
-  threadsPerCUDABlock = 128;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
   CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
   statevec_hadamardDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
     qureg.numAmpsPerChunk,
@@ -1559,7 +1624,7 @@ struct calcProb{
   // stage 1 done!
   qreal totalProbability = 0.0;
   // int threadsPerCUDABlock, CUDABlocks;
-  // threadsPerCUDABlock = 128;
+  // threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
   // CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
   // statevec_findProbabilityOfZeroDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
   //   qureg.numAmpsPerChunk,
@@ -1947,7 +2012,7 @@ void statevec_initBlankState(Qureg qureg)
   // stage 1 done!
 
   int threadsPerCUDABlock, CUDABlocks;
-  threadsPerCUDABlock = 128;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
   CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
   statevec_initBlankStateKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
       qureg.numAmpsPerChunk, 
@@ -1979,7 +2044,7 @@ void statevec_initZeroState(Qureg qureg)
   if (qureg.chunkId==0) {
 
     int threadsPerCUDABlock, CUDABlocks;
-    threadsPerCUDABlock = 128;
+    threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
     CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
 
     // zero state |0000..0000> has probability 1
@@ -2223,7 +2288,7 @@ void statevec_initPlusState(Qureg qureg)
 
   // initialise the state to |+++..+++> = 1/normFactor {1, 1, 1, ...}
   int threadsPerCUDABlock, CUDABlocks;
-  threadsPerCUDABlock = 128;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
   CUDABlocks = ceil((qreal)(chunkSize)/threadsPerCUDABlock);
   statevec_initPlusStateKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
       chunkSize, 
@@ -2257,7 +2322,7 @@ void statevec_initClassicalState(Qureg qureg, long long int stateInd)
 {
   // stage 1 done!
   int threadsPerCUDABlock, CUDABlocks;
-  threadsPerCUDABlock = 128;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
   CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
 
   // dimension of the state vector
