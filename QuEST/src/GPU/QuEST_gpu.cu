@@ -243,6 +243,10 @@ __global__ void statevec_controlledPhaseShiftKernel(Qureg qureg, const int idQub
   long long int index;
   long long int stateVecSize;
   int bit1, bit2;
+
+  long long int chunkSize = qureg.numAmpsPerChunk;
+  long long int chunkId=qureg.chunkId;
+  
   qreal stateRealLo, stateImagLo;
 
   stateVecSize = qureg.numAmpsPerChunk;
@@ -252,8 +256,8 @@ __global__ void statevec_controlledPhaseShiftKernel(Qureg qureg, const int idQub
   index = blockIdx.x*blockDim.x + threadIdx.x;
   if (index>=stateVecSize) return;
 
-  bit1 = extractBit (idQubit1, index);
-  bit2 = extractBit (idQubit2, index);
+  bit1 = extractBit (idQubit1, index+chunkId*chunkSize);
+  bit2 = extractBit (idQubit2, index+chunkId*chunkSize);
   if (bit1 && bit2) {
       stateRealLo = stateVecReal[index];
       stateImagLo = stateVecImag[index];
@@ -265,6 +269,8 @@ __global__ void statevec_controlledPhaseShiftKernel(Qureg qureg, const int idQub
 
 void statevec_controlledPhaseShift(Qureg qureg, const int idQubit1, const int idQubit2, qreal angle)
 {
+  // stage 1 done!
+
   qreal cosAngle = cos(angle);
   qreal sinAngle = sin(angle);
   
