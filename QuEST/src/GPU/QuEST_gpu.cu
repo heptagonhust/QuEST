@@ -124,6 +124,7 @@ void statevec_initStateOfSingleQubit(Qureg *qureg, int qubitId, int outcome)
     qubitId, outcome);
 }
 
+
 __global__ void statevec_compareStatesKernel(
   long long int chunkSize,
   qreal& mq1Real, 
@@ -456,6 +457,7 @@ __global__ void statevec_setWeightedQuregKernel(Complex fac1, Qureg qureg1, Comp
 }
 
 void statevec_setWeightedQureg(Complex fac1, Qureg qureg1, Complex fac2, Qureg qureg2, Complex facOut, Qureg out) {
+  // stage 1 done!
 
   long long int numAmpsToVisit = qureg1.numAmpsPerChunk;
 
