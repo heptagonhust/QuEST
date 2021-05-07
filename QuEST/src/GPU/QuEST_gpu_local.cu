@@ -1133,8 +1133,6 @@ Complex statevec_calcInnerProductLocal(Qureg bra, Qureg ket) {
     return innerProd;
 }
 
-
-
 __global__ void statevec_collapseToKnownProbOutcomeKernel(Qureg qureg, int measureQubit, int outcome, qreal totalProbability)
 {
     // ----- sizes
