@@ -48,37 +48,57 @@ extern "C" {
 // related `*Local`-suffix functions for them.
 //
 
-__global__ void statevec_initDebugStateKernel(long long int stateVecSize, qreal *stateVecReal, qreal *stateVecImag){
+__global__ void statevec_initDebugStateKernel(
+  long long int chunkSize, 
+  long long int chunkId, 
+  qreal *stateVecReal, 
+  qreal *stateVecImag)
+{
+
   long long int index;
+  long long int indexOffset = chunkSize * chunkId;
 
   index = blockIdx.x*blockDim.x + threadIdx.x;
-  if (index>=stateVecSize) return;
+  if (index>=chunkSize) return;
 
-  stateVecReal[index] = (index*2.0)/10.0;
-  stateVecImag[index] = (index*2.0+1.0)/10.0;
+  stateVecReal[index] = ((indexOffset + index)*2.0)/10.0;
+  stateVecImag[index] = ((indexOffset + index)*2.0+1.0)/10.0;
 }
 
 void statevec_initDebugState(Qureg qureg)
 {
+  // stage 1 done!
+
   int threadsPerCUDABlock, CUDABlocks;
   threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
   CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
   statevec_initDebugStateKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
       qureg.numAmpsPerChunk,
+      qureg.chunkId,
       qureg.stateVec.real, 
       qureg.stateVec.imag);
 }
 
 
-__global__ void statevec_initStateOfSingleQubitKernel(long long int stateVecSize, qreal *stateVecReal, qreal *stateVecImag, int qubitId, int outcome){
+__global__ void statevec_initStateOfSingleQubitKernel(
+  long long int chunkSize,
+  long long int numChunks,
+  long long int chunkId,
+  qreal *stateVecReal, 
+  qreal *stateVecImag, 
+  int qubitId, 
+  int outcome)
+{
+
   long long int index;
-  int bit;
+  long long int stateVecSize = chunkSize*numChunks;
 
   index = blockIdx.x*blockDim.x + threadIdx.x;
-  if (index>=stateVecSize) return;
+  if (index>=chunkSize) return;
 
   qreal normFactor = 1.0/sqrt((qreal)stateVecSize/2);
-  bit = extractBit(qubitId, index);
+
+  int bit = extractBit(qubitId, index+chunkId*chunkSize);
   if (bit==outcome) {
       stateVecReal[index] = normFactor;
       stateVecImag[index] = 0.0;
@@ -90,29 +110,63 @@ __global__ void statevec_initStateOfSingleQubitKernel(long long int stateVecSize
 
 void statevec_initStateOfSingleQubit(Qureg *qureg, int qubitId, int outcome)
 {
+  // stage 1 done!
+
   int threadsPerCUDABlock, CUDABlocks;
   threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
   CUDABlocks = ceil((qreal)(qureg->numAmpsPerChunk)/threadsPerCUDABlock);
-  statevec_initStateOfSingleQubitKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg->numAmpsPerChunk, qureg->stateVec.real, qureg->stateVec.imag, qubitId, outcome);
+  statevec_initStateOfSingleQubitKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
+    qureg->numAmpsPerChunk, 
+    qureg->numChunks,
+    qureg->chunkId,
+    qureg->stateVec.real, 
+    qureg->stateVec.imag, 
+    qubitId, outcome);
 }
 
+__global__ void statevec_compareStatesKernel(
+  long long int chunkSize,
+  qreal& mq1Real, 
+  qreal& mq2Real,
+  qreal& mq1Imag,
+  qreal& mq2Imag,
+  qreal precision,
+  int *flag)
+{
+  long long int index = blockIdx.x*blockDim.x + threadIdx.x;
+  if (index >= chunkSize) return ;
+  if (absReal(mq1Real - mq2Real) > precision ||
+      absReal(mq1Imag - mq2Imag) > precision)
+    {
+      *flag = 1;
+      return ;
+    }
+}
 
-int statevec_compareStates(Qureg mq1, Qureg mq2, qreal precision){
-  qreal diff;
-  int chunkSize = mq1.numAmpsPerChunk;
+int statevec_compareStates(Qureg mq1, Qureg mq2, qreal precision)
+{
+  // stage 1 done!
 
-  copyStateFromGPU(mq1);
-  copyStateFromGPU(mq2);
+  long long int chunkSize = mq1.numAmpsPerChunk;
 
-  for (int i=0; i<chunkSize; i++){
-      diff = mq1.stateVec.real[i] - mq2.stateVec.real[i];
-      if (diff<0) diff *= -1;
-      if (diff>precision) return 0;
-      diff = mq1.stateVec.imag[i] - mq2.stateVec.imag[i];
-      if (diff<0) diff *= -1;
-      if (diff>precision) return 0;
+  int threadsPerCUDABlock, CUDABlocks;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
+  CUDABlocks = ceil((qreal)(chunkSize)/threadsPerCUDABlock);
+  
+  int *d_flag_ptr = (int*)mallocZeroVarInDevice(1);
+  for (long long int i=0; i<chunkSize; i++){
+    statevec_compareStatesKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
+      chunkSize,
+      mq1.stateVec.real[i],
+      mq2.stateVec.real[i],
+      mq1.stateVec.imag[i],
+      mq2.stateVec.imag[i],
+      precision,
+      d_flag_ptr);
   }
-  return 1;
+  int h_flag;
+  cudaMemcpy(&h_flag, d_flag_ptr, 1, cudaMemcpyDeviceToHost);
+  return 1 - h_flag;
 }
 
 
