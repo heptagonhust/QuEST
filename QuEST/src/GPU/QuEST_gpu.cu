@@ -307,7 +307,7 @@ __global__ void statevec_multiControlledPhaseShiftKernel(Qureg qureg, long long 
 void statevec_multiControlledPhaseShift(Qureg qureg, int *controlQubits, int numControlQubits, qreal angle)
 {
   // stage 1 done!
-  
+
   qreal cosAngle = cos(angle);
   qreal sinAngle = sin(angle);
 
@@ -326,10 +326,14 @@ __global__ void statevec_multiRotateZKernel(Qureg qureg, long long int mask, qre
   long long int index = blockIdx.x*blockDim.x + threadIdx.x;
   if (index>=stateVecSize) return;
   
+  const long long int chunkSize=qureg.numAmpsPerChunk;
+  const long long int chunkId=qureg.chunkId;
+  
   qreal *stateVecReal = qureg.stateVec.real;
   qreal *stateVecImag = qureg.stateVec.imag;
   
-  int fac = getBitMaskParity(mask & index)? -1 : 1;
+  // odd-parity target qubits get fac_j = -1
+  int fac = getBitMaskParity(mask & (index+chunkId*chunkSize))? -1 : 1;
   qreal stateReal = stateVecReal[index];
   qreal stateImag = stateVecImag[index];
   
@@ -339,6 +343,8 @@ __global__ void statevec_multiRotateZKernel(Qureg qureg, long long int mask, qre
 
 void statevec_multiRotateZ(Qureg qureg, long long int mask, qreal angle)
 {   
+  // stage 1 done!
+
   qreal cosAngle = cos(angle/2.0);
   qreal sinAngle = sin(angle/2.0);
       
@@ -355,6 +361,9 @@ __global__ void statevec_controlledPhaseFlipKernel(Qureg qureg, const int idQubi
     long long int stateVecSize;
     int bit1, bit2;
 
+    const long long int chunkSize=qureg.numAmpsPerChunk;
+    const long long int chunkId=qureg.chunkId;
+
     stateVecSize = qureg.numAmpsPerChunk;
     qreal *stateVecReal = qureg.stateVec.real;
     qreal *stateVecImag = qureg.stateVec.imag;
@@ -362,8 +371,8 @@ __global__ void statevec_controlledPhaseFlipKernel(Qureg qureg, const int idQubi
     index = blockIdx.x*blockDim.x + threadIdx.x;
     if (index>=stateVecSize) return;
 
-    bit1 = extractBit (idQubit1, index);
-    bit2 = extractBit (idQubit2, index);
+    bit1 = extractBit (idQubit1, index+chunkId*chunkSize);
+    bit2 = extractBit (idQubit2, index+chunkId*chunkSize);
     if (bit1 && bit2) {
         stateVecReal [index] = - stateVecReal [index];
         stateVecImag [index] = - stateVecImag [index];
@@ -372,6 +381,8 @@ __global__ void statevec_controlledPhaseFlipKernel(Qureg qureg, const int idQubi
 
 void statevec_controlledPhaseFlip(Qureg qureg, const int idQubit1, const int idQubit2)
 {
+    // stage 1 done!
+    
     int threadsPerCUDABlock, CUDABlocks;
     threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
     CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
