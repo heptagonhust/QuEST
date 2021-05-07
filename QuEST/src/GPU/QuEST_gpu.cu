@@ -382,7 +382,7 @@ __global__ void statevec_controlledPhaseFlipKernel(Qureg qureg, const int idQubi
 void statevec_controlledPhaseFlip(Qureg qureg, const int idQubit1, const int idQubit2)
 {
     // stage 1 done!
-    
+
     int threadsPerCUDABlock, CUDABlocks;
     threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
     CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
@@ -395,6 +395,9 @@ __global__ void statevec_multiControlledPhaseFlipKernel(Qureg qureg, long long i
     long long int index;
     long long int stateVecSize;
 
+    const long long int chunkSize=qureg.numAmpsPerChunk;
+    const long long int chunkId=qureg.chunkId;
+
     stateVecSize = qureg.numAmpsPerChunk;
     qreal *stateVecReal = qureg.stateVec.real;
     qreal *stateVecImag = qureg.stateVec.imag;
@@ -402,7 +405,7 @@ __global__ void statevec_multiControlledPhaseFlipKernel(Qureg qureg, long long i
     index = blockIdx.x*blockDim.x + threadIdx.x;
     if (index>=stateVecSize) return;
 
-    if (mask == (mask & index) ){
+    if (mask == (mask & (index+chunkId*chunkSize)) ){
         stateVecReal [index] = - stateVecReal [index];
         stateVecImag [index] = - stateVecImag [index];
     }
@@ -410,6 +413,8 @@ __global__ void statevec_multiControlledPhaseFlipKernel(Qureg qureg, long long i
 
 void statevec_multiControlledPhaseFlip(Qureg qureg, int *controlQubits, int numControlQubits)
 {
+    // stage 1 done!
+
     int threadsPerCUDABlock, CUDABlocks;
     long long int mask = getQubitBitMask(controlQubits, numControlQubits);
     threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
