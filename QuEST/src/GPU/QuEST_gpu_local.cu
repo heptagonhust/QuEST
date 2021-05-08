@@ -1,8 +1,8 @@
 #include "QuEST_gpu_internal.h"
 
-/*
- * state vector and density matrix operations 
- */
+//
+// State Vector Operations
+//
 
 #ifdef __cplusplus
 extern "C" {
@@ -1201,6 +1201,41 @@ void statevec_collapseToKnownProbOutcomeLocal(Qureg qureg, const int measureQubi
     statevec_collapseToKnownProbOutcomeKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg, measureQubit, outcome, outcomeProb);
 }
 
+
+
+//
+// Density Matrix Operations
+//
+
+__global__ void densmatr_initPureStateKernel(
+    long long int numPureAmps,
+    qreal *targetVecReal, qreal *targetVecImag, 
+    qreal *copyVecReal, qreal *copyVecImag) 
+{
+    // this is a particular index of the pure copyQureg
+    long long int index = blockIdx.x*blockDim.x + threadIdx.x;
+    if (index>=numPureAmps) return;
+    
+    qreal realRow = copyVecReal[index];
+    qreal imagRow = copyVecImag[index];
+    for (long long int col=0; col < numPureAmps; col++) {
+        qreal realCol =   copyVecReal[col];
+        qreal imagCol = - copyVecImag[col]; // minus for conjugation
+        targetVecReal[col*numPureAmps + index] = realRow*realCol - imagRow*imagCol;
+        targetVecImag[col*numPureAmps + index] = realRow*imagCol + imagRow*realCol;
+    }
+}
+
+void densmatr_initPureStateLocal(Qureg targetQureg, Qureg copyQureg)
+{
+    int threadsPerCUDABlock, CUDABlocks;
+    threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
+    CUDABlocks = ceil((qreal)(copyQureg.numAmpsPerChunk)/threadsPerCUDABlock);
+    densmatr_initPureStateKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
+        copyQureg.numAmpsPerChunk,
+        targetQureg.stateVec.real, targetQureg.stateVec.imag,
+        copyQureg.stateVec.real,   copyQureg.stateVec.imag);
+}
 
 
 //

@@ -471,9 +471,46 @@ void statevec_setWeightedQureg(Complex fac1, Qureg qureg1, Complex fac2, Qureg q
 
 
 
+//
+// Density Martix Opeartions
+//
+
+__global__ void densmatr_initPlusStateKernel (
+  long long int chunkSize,
+  qreal *densityReal,
+  qreal *densityImag,
+  qreal probFactor)
+{
+  long long int index = blockIdx.x*blockDim.x + threadIdx.x;
+  // initialise the state to |+++..+++> = 1/normFactor {1, 1, 1, ...}
+  densityReal[index] = probFactor;
+  densityImag[index] = 0.0;
+}
+
+void densmatr_initPlusState (Qureg qureg)
+{
+  // stage 1 done!
+
+  // |+><+| = sum_i 1/sqrt(2^N) |i> 1/sqrt(2^N) <j| = sum_ij 1/2^N |i><j|
+  long long int dim = (1LL << qureg.numQubitsRepresented);
+  qreal probFactor = 1.0/((qreal) dim);
+
+  int threadsPerCUDABlock, CUDABlocks;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
+  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
+  densmatr_initPlusStateKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
+    qureg.numAmpsPerChunk,
+    qureg.stateVec.real,
+    qureg.stateVec.imag,
+    probFactor
+  );
+}
 // densmatr
+// Not used at all
 void densmatr_initPureState(Qureg targetQureg, Qureg copyQureg){}
-void densmatr_initPlusState(Qureg qureg){}
+
+
+// void densmatr_initPlusState(Qureg qureg){}
 void densmatr_initClassicalState(Qureg qureg, long long int stateInd){}
 void densmatr_collapseToKnownProbOutcome(Qureg qureg, const int measureQubit, int outcome, qreal outcomeProb){}
 void densmatr_mixDensityMatrix(Qureg combineQureg, qreal otherProb, Qureg otherQureg){}

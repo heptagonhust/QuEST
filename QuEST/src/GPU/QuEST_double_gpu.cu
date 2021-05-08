@@ -2331,3 +2331,68 @@ void statevec_initClassicalState(Qureg qureg, long long int stateInd)
 #ifdef __cplusplus
 }
 #endif
+
+
+//
+// Density Matrix Functions
+//
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/** This copies/clones vec (a statevector) into every node's matr pairState.
+ * (where matr is a density matrix or equal number of qubits as vec) */
+ void NOT_USED_AT_ALL copyVecIntoMatrixPairState(Qureg matr, Qureg vec) {
+
+  // stage 1 done!
+  // cuMPI done!
+    
+  // Remember that for every amplitude that `vec` stores on the node,
+  // `matr` stores an entire column. Ergo there are always an integer
+  // number (in fact, a power of 2) number of  `matr`s columns on each node.
+  // Since the total size of `vec` (between all nodes) is one column
+  // and each node stores (possibly) multiple columns (vec.numAmpsPerChunk as many), 
+  // `vec` can be fit entirely inside a single node's matr.pairStateVec (with excess!)
+  
+  // copy this node's vec segment into this node's matr pairState (in the right spot)
+  long long int numLocalAmps = vec.numAmpsPerChunk;
+  long long int myOffset = vec.chunkId * numLocalAmps;
+  cudaMemcpy(&matr.pairStateVec.real[myOffset], vec.stateVec.real, numLocalAmps * sizeof(qreal), cudaMemcpyDeviceToDevice);
+  cudaMemcpy(&matr.pairStateVec.imag[myOffset], vec.stateVec.imag, numLocalAmps * sizeof(qreal), cudaMemcpyDeviceToDevice);
+  
+  // we now want to share this node's vec segment with other node, so that 
+  // vec is cloned in every node's matr.pairStateVec 
+
+  // work out how many messages needed to send vec chunks (2GB limit)
+  long long int maxMsgSize = cuMPI_MAX_AMPS_IN_MSG;
+  if (numLocalAmps < maxMsgSize) 
+      maxMsgSize = numLocalAmps;
+  // safely assume MPI_MAX... = 2^n, so division always exact:
+  int numMsgs = numLocalAmps / maxMsgSize;
+  
+  // every node gets a turn at being the broadcaster
+  for (int broadcaster=0; broadcaster < vec.numChunks; broadcaster++) {
+      
+      long long int otherOffset = broadcaster * numLocalAmps;
+  
+      // every node sends a slice of qureg's pairState to every other
+      for (int i=0; i< numMsgs; i++) {
+  
+          // by sending that slice in further slices (due to bandwidth limit)
+          cuMPI_Bcast(
+              &matr.pairStateVec.real[otherOffset + i*maxMsgSize], 
+              maxMsgSize,  cuMPI_QuEST_REAL, broadcaster, cuMPI_COMM_WORLD);
+          cuMPI_Bcast(
+              &matr.pairStateVec.imag[otherOffset + i*maxMsgSize], 
+              maxMsgSize,  cuMPI_QuEST_REAL, broadcaster, cuMPI_COMM_WORLD);
+      }
+  }
+}
+
+
+
+
+#ifdef __cplusplus
+}
+#endif

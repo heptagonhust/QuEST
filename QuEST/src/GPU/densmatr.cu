@@ -1599,3 +1599,31 @@ qreal densmatr_calcPurity(Qureg qureg) {
 
 // qreal densmatr_calcInnerProduct(Qureg a, Qureg b) {}
 // qreal densmatr_calcInnerProductLocal(Qureg a, Qureg b) {}
+
+
+void NOT_USED_AT_ALL densmatr_initPureState(Qureg targetQureg, Qureg copyQureg) {
+
+  if (targetQureg.numChunks==1){
+      // local version
+      // save pointers to qureg's pair state
+      qreal* quregPairRePtr = targetQureg.pairStateVec.real;
+      qreal* quregPairImPtr = targetQureg.pairStateVec.imag;
+
+      // populate qureg pair state with pure state (by repointing)
+      targetQureg.pairStateVec.real = copyQureg.stateVec.real;
+      targetQureg.pairStateVec.imag = copyQureg.stateVec.imag;
+
+      // populate density matrix via it's pairState
+      densmatr_initPureStateLocal(targetQureg, copyQureg);
+
+      // restore pointers
+      targetQureg.pairStateVec.real = quregPairRePtr;
+      targetQureg.pairStateVec.imag = quregPairImPtr;
+  } else {
+      // set qureg's pairState is to be the full pure state (on every node)
+      copyVecIntoMatrixPairState(targetQureg, copyQureg);
+      
+      // update every density matrix chunk using pairState
+      densmatr_initPureStateLocal(targetQureg, copyQureg);
+  }
+}
