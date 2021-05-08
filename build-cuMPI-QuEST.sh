@@ -1,9 +1,11 @@
 QUESTHOME=/home/yh/QuEST
 NCCL_SOCKET_IFNAME=ib0
 
+source env.sh
+
 # cuMPI
 cd $QUESTHOME/QuEST/src/GPU/cuMPI
-if [ "$1" -eq "empty" ]; then
+if [ "$1" = "empty" ]; then
   if [ -d "build" ]; then 
     rm -rf build
   fi
@@ -25,7 +27,7 @@ fi
 
 # GHZ_QFT
 cd $QUESTHOME/GHZ_QFT
-if [ "$1" -eq "empty" ]; then
+if [ "$1" = "empty" ]; then
   if [ -d "build" ]; then 
     rm -rf build
   fi
@@ -47,7 +49,7 @@ fi
 # random
 cd ../..
 cd random
-if [ "$1" -eq "empty" ]; then
+if [ "$1" = "empty" ]; then
   if [ -d "build" ]; then 
     rm -rf build
   fi
