@@ -1,42 +1,68 @@
+QUESTHOME=/home/yh/QuEST
 NCCL_SOCKET_IFNAME=ib0
 
-cd QuEST/src/GPU/cuMPI
-if [ -d "build" ]; then 
-  rm -rf build
+# cuMPI
+cd $QUESTHOME/QuEST/src/GPU/cuMPI
+if [ "$1" -eq "empty" ]; then
+  if [ -d "build" ]; then 
+    rm -rf build
+  fi
+  mkdir build
+  cd build
+  cmake -DNCCL_LIBRARY=/lib64/libnccl.so \
+        -DNCCL_INCLUDE_DIR=/usr/include/ \
+        ..
+else
+  cd build
 fi
-mkdir build
-cd build
-cmake -DNCCL_LIBRARY=/lib64/libnccl.so \
-      -DNCCL_INCLUDE_DIR=/usr/include/ \
-      ..
 make -j
 if [[ "$?" -ne "0" ]]; then
-  cd /root/QuEST-experiments/QuEST
+  cd $QUESTHOME
   read 
+  exit 255
 fi
 \cp -f src/libcuMPI.so /lib64/libcuMPI.so
 
-cd ../../../../..
-cd GHZ_QFT
-if [ -d "build" ]; then 
-  rm -rf build
+# GHZ_QFT
+cd $QUESTHOME/GHZ_QFT
+if [ "$1" -eq "empty" ]; then
+  if [ -d "build" ]; then 
+    rm -rf build
+  fi
+  mkdir build
+  cd build
+  cmake ../../ -DGPUACCELERATED=ON -DMULTITHREADED=OFF
+else
+  cd build
 fi
-mkdir build
-cd build
-cmake ../../ -DGPUACCELERATED=ON -DMULTITHREADED=OFF
 make -j
+if [[ "$?" -ne "0" ]]; then
+  cd $QUESTHOME
+  read 
+  exit 255
+fi
 \cp -f qft ~
 \cp -f QuEST/libQuEST.so /lib64/libQuEST.so
 
+# random
 cd ../..
 cd random
-if [ -d "build" ]; then 
-  rm -rf build
+if [ "$1" -eq "empty" ]; then
+  if [ -d "build" ]; then 
+    rm -rf build
+  fi
+  mkdir build
+  cd build
+  cmake ../../ -DGPUACCELERATED=ON -DMULTITHREADED=OFF
+else
+  cd build
 fi
-mkdir build
-cd build
-cmake ../../ -DGPUACCELERATED=ON -DMULTITHREADED=OFF
 make -j
+if [[ "$?" -ne "0" ]]; then
+  cd $QUESTHOME
+  read 
+  exit 255
+fi
 \cp -f demo ~
 
-cd ../../
+cd $QUESTHOME
