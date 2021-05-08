@@ -1,4 +1,3 @@
-TARGET_NODE=icu02
 NCCL_SOCKET_IFNAME=ib0
 
 cd QuEST/src/GPU/cuMPI
@@ -10,7 +9,7 @@ cd build
 cmake -DNCCL_LIBRARY=/lib64/libnccl.so \
       -DNCCL_INCLUDE_DIR=/usr/include/ \
       ..
-make -j16
+make -j
 if [[ "$?" -ne "0" ]]; then
   cd /root/QuEST-experiments/QuEST
   read 
@@ -25,7 +24,7 @@ fi
 mkdir build
 cd build
 cmake ../../ -DGPUACCELERATED=ON -DMULTITHREADED=OFF
-make -j16
+make -j
 \cp -f qft ~
 \cp -f QuEST/libQuEST.so /lib64/libQuEST.so
 
@@ -37,7 +36,7 @@ fi
 mkdir build
 cd build
 cmake ../../ -DGPUACCELERATED=ON -DMULTITHREADED=OFF
-make -j16
+make -j
 \cp -f demo ~
 
 cd ../../

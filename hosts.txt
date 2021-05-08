@@ -1,2 +1,0 @@
-inode332 slots=16
-inode334 slots=16
