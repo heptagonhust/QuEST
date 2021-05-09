@@ -670,6 +670,37 @@ void densmatr_collapseToKnownProbOutcome(Qureg qureg, const int measureQubit, in
 
 }
 
+
+__global__ void densmatr_mixDensityMatrixKernel(Qureg combineQureg, qreal otherProb, Qureg otherQureg) {
+
+  /* corresponding amplitudes live on the same node (same dimensions) */
+
+  qreal* combineVecRe = combineQureg.stateVec.real;
+  qreal* combineVecIm = combineQureg.stateVec.imag;
+  qreal* otherVecRe = otherQureg.stateVec.real;
+  qreal* otherVecIm = otherQureg.stateVec.imag;
+  long long int numAmps = combineQureg.numAmpsPerChunk;
+  long long int index = blockIdx.x*blockDim.x + threadIdx.x;
+  if (index >= numAmps) return ;
+
+  combineVecRe[index] *= 1-otherProb;
+  combineVecIm[index] *= 1-otherProb;
+
+  combineVecRe[index] += otherProb * otherVecRe[index];
+  combineVecIm[index] += otherProb * otherVecIm[index];
+}
+
+void densmatr_mixDensityMatrix(Qureg combineQureg, qreal otherProb, Qureg otherQureg) {
+
+  // stage 1 done!
+
+  int threadsPerCUDABlock, CUDABlocks;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
+  CUDABlocks = ceil(combineQureg.numAmpsPerChunk / (qreal) threadsPerCUDABlock);
+
+  densmatr_mixDensityMatrixKernel<<<CUDABlocks, threadsPerCUDABlock>>>(combineQureg, otherProb, otherQureg);
+}
+
 // densmatr
 // Not used at all
 void densmatr_initPureState(Qureg targetQureg, Qureg copyQureg){}
@@ -678,7 +709,7 @@ void densmatr_initPureState(Qureg targetQureg, Qureg copyQureg){}
 // void densmatr_initPlusState(Qureg qureg){}
 // void densmatr_initClassicalState(Qureg qureg, long long int stateInd){}
 // void densmatr_collapseToKnownProbOutcome(Qureg qureg, const int measureQubit, int outcome, qreal outcomeProb){}
-void densmatr_mixDensityMatrix(Qureg combineQureg, qreal otherProb, Qureg otherQureg){}
+// void densmatr_mixDensityMatrix(Qureg combineQureg, qreal otherProb, Qureg otherQureg){}
 void densmatr_oneQubitDegradeOffDiagonal(Qureg qureg, const int targetQubit, qreal dephFac){}
 void densmatr_mixDephasing(Qureg qureg, const int targetQubit, qreal dephase){}
 void densmatr_mixTwoQubitDephasing(Qureg qureg, int qubit1, int qubit2, qreal dephase){}
