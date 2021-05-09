@@ -534,14 +534,150 @@ void densmatr_initClassicalState (Qureg qureg, long long int stateInd)
   }
 }
 
+
+/* Without nested parallelisation, only the outer most loops which call below are parallelised */
+inline void zeroSomeAmps(Qureg qureg, long long int startInd, long long int numAmps) {
+  cudaMemset(&qureg.stateVec.real[startInd], 0, numAmps * sizeof(qreal));
+  cudaMemset(&qureg.stateVec.imag[startInd], 0, numAmps * sizeof(qreal));
+}
+
+__global__ void normaliseSomeAmpsKernel(Qureg qureg, qreal norm, long long int startInd, long long int numAmps) {
+  long long int index = blockIdx.x*blockDim.x + threadIdx.x;
+  if (index >= numAmps) return ;
+  qureg.stateVec.real[i+startInd] /= norm;
+  qureg.stateVec.imag[i+startInd] /= norm;
+}
+
+__global__ void alternateNormZeroingSomeAmpBlocksKernel(
+  Qureg qureg, qreal norm, int normFirst,
+  long long int startAmpInd, long long int numAmps, long long int blockSize
+) {
+  long long int numDubBlocks = numAmps / (2*blockSize);
+  long long int dubBlockInd = blockIdx.x*blockDim.x + threadIdx.x;
+  if (dubBlockInd >= numDubBlocks) return ;
+
+  long long int blockStartInd = startAmpInd + dubBlockInd*2*blockSize;
+
+  int threadsPerCUDABlock, CUDABlocks;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
+  CUDABlocks = ceil(numAmps / (qreal) threadsPerCUDABlock);
+
+  if (normFirst) {
+    normaliseSomeAmpsKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg, norm, blockStartInd,blockSize); // |0><0|
+    zeroSomeAmps(     qureg,       blockStartInd + blockSize, blockSize);
+  } else {
+    zeroSomeAmps(     qureg,       blockStartInd,             blockSize);
+    normaliseSomeAmpsKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg, norm, blockStartInd + blockSize, blockSize); // |1><1|
+  }
+}
+
+void alternateNormZeroingSomeAmpBlocks(
+  Qureg qureg, qreal norm, int normFirst,
+  long long int startAmpInd, long long int numAmps, long long int blockSize
+) {
+  long long int numDubBlocks = numAmps / (2*blockSize);
+
+  int threadsPerCUDABlock, CUDABlocks;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
+  CUDABlocks = ceil(numDubBlocks / (qreal) threadsPerCUDABlock);
+
+  alternateNormZeroingSomeAmpBlocksKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
+    qureg, norm, normFirst,
+    startAmpInd, numAmps, blockSize);
+}
+
+/** Renorms (/prob) every | * outcome * >< * outcome * | state, setting all others to zero */
+void densmatr_collapseToKnownProbOutcome(Qureg qureg, const int measureQubit, int outcome, qreal totalStateProb) {
+
+  // stage 1 done! not very sure for cocurrent of for-loop
+
+  // only (global) indices (as bit sequence): '* outcome *(n+q) outcome *q are spared
+  // where n = measureQubit, q = qureg.numQubitsRepresented.
+  // We can thus step in blocks of 2^q+n, killing every second, and inside the others,
+  //  stepping in sub-blocks of 2^q, killing every second.
+  // When outcome=1, we offset the start of these blocks by their size.
+  long long int innerBlockSize = (1LL << measureQubit);
+  long long int outerBlockSize = (1LL << (measureQubit + qureg.numQubitsRepresented));
+
+  // Because there are 2^a number of nodes(/chunks), each node will contain 2^b number of blocks,
+  // or each block will span 2^c number of nodes. Similarly for the innerblocks.
+  long long int locNumAmps = qureg.numAmpsPerChunk;
+  long long int globalStartInd = qureg.chunkId * locNumAmps;
+  int innerBit = extractBitOnCPU(measureQubit, globalStartInd);
+  int outerBit = extractBitOnCPU(measureQubit + qureg.numQubitsRepresented, globalStartInd);
+
+  // If this chunk's amps are entirely inside an outer block
+  if (locNumAmps <= outerBlockSize) {
+
+      // if this is an undesired outer block, kill all elems
+      if (outerBit != outcome)
+          return zeroSomeAmps(qureg, 0, qureg.numAmpsPerChunk);
+
+      // othwerwise, if this is a desired outer block, and also entirely an inner block
+      if (locNumAmps <= innerBlockSize) {
+
+          // and that inner block is undesired, kill all elems
+          if (innerBit != outcome)
+              return zeroSomeAmps(qureg, 0, qureg.numAmpsPerChunk);
+          // otherwise normalise all elems
+          else {
+            int threadsPerCUDABlock, CUDABlocks;
+            threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
+            CUDABlocks = ceil(qureg.numAmpsPerChunk / (qreal) threadsPerCUDABlock);
+            normaliseSomeAmpsKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg, totalStateProb, 0, qureg.numAmpsPerChunk);
+            return ;
+          }
+      }
+
+      // otherwise this is a desired outer block which contains 2^a inner blocks; kill/renorm every second inner block
+      return alternateNormZeroingSomeAmpBlocks(
+          qureg, totalStateProb, innerBit==outcome, 0, qureg.numAmpsPerChunk, innerBlockSize);
+  }
+
+  // Otherwise, this chunk's amps contain multiple outer blocks (and hence multiple inner blocks)
+  long long int numOuterDoubleBlocks = locNumAmps / (2*outerBlockSize);
+  long long int firstBlockInd;
+
+  // alternate norming* and zeroing the outer blocks (with order based on the desired outcome)
+  // These loops aren't parallelised, since they could have 1 or 2 iterations and will prevent
+  // inner parallelisation
+  if (outerBit == outcome) {
+
+      for (long long int outerDubBlockInd = 0; outerDubBlockInd < numOuterDoubleBlocks; outerDubBlockInd++) {
+          firstBlockInd = outerDubBlockInd*2*outerBlockSize;
+
+          // *norm only the desired inner blocks in the desired outer block
+          alternateNormZeroingSomeAmpBlocks(
+              qureg, totalStateProb, innerBit==outcome,
+              firstBlockInd, outerBlockSize, innerBlockSize);
+
+          // zero the undesired outer block
+          zeroSomeAmps(qureg, firstBlockInd + outerBlockSize, outerBlockSize);
+      }
+
+  } else {
+
+      for (long long int outerDubBlockInd = 0; outerDubBlockInd < numOuterDoubleBlocks; outerDubBlockInd++) {
+          firstBlockInd = outerDubBlockInd*2*outerBlockSize;
+
+          // same thing but undesired outer blocks come first
+          zeroSomeAmps(qureg, firstBlockInd, outerBlockSize);
+          alternateNormZeroingSomeAmpBlocks(
+              qureg, totalStateProb, innerBit==outcome,
+              firstBlockInd + outerBlockSize, outerBlockSize, innerBlockSize);
+      }
+  }
+
+}
+
 // densmatr
 // Not used at all
 void densmatr_initPureState(Qureg targetQureg, Qureg copyQureg){}
 
 
 // void densmatr_initPlusState(Qureg qureg){}
-void densmatr_initClassicalState(Qureg qureg, long long int stateInd){}
-void densmatr_collapseToKnownProbOutcome(Qureg qureg, const int measureQubit, int outcome, qreal outcomeProb){}
+// void densmatr_initClassicalState(Qureg qureg, long long int stateInd){}
+// void densmatr_collapseToKnownProbOutcome(Qureg qureg, const int measureQubit, int outcome, qreal outcomeProb){}
 void densmatr_mixDensityMatrix(Qureg combineQureg, qreal otherProb, Qureg otherQureg){}
 void densmatr_oneQubitDegradeOffDiagonal(Qureg qureg, const int targetQubit, qreal dephFac){}
 void densmatr_mixDephasing(Qureg qureg, const int targetQubit, qreal dephase){}
