@@ -154,7 +154,7 @@ int statevec_compareStates(Qureg mq1, Qureg mq2, qreal precision)
   threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
   CUDABlocks = ceil((qreal)(chunkSize)/threadsPerCUDABlock);
   
-  int *d_flag_ptr = (int*)mallocZeroVarInDevice(1);
+  int *d_flag_ptr = (int*)mallocZeroVarInDevice( 1 * sizeof(int) );
   for (long long int i=0; i<chunkSize; i++){
     statevec_compareStatesKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
       chunkSize,
@@ -166,7 +166,7 @@ int statevec_compareStates(Qureg mq1, Qureg mq2, qreal precision)
       d_flag_ptr);
   }
   int h_flag;
-  cudaMemcpy(&h_flag, d_flag_ptr, 1, cudaMemcpyDeviceToHost);
+  cudaMemcpy(&h_flag, d_flag_ptr, 1 * sizeof(int), cudaMemcpyDeviceToHost);
   return 1 - h_flag;
 }
 
@@ -505,6 +505,35 @@ void densmatr_initPlusState (Qureg qureg)
     probFactor
   );
 }
+
+
+void densmatr_initClassicalState (Qureg qureg, long long int stateInd)
+{
+  // stage 1 done!
+  
+  // dimension of the state vector
+  long long int densityNumElems = qureg.numAmpsPerChunk;
+
+  qreal *densityReal = qureg.stateVec.real;
+  qreal *densityImag = qureg.stateVec.imag;
+
+  // initialise the state to all zeros
+  cudaMemset(densityReal, 0, densityNumElems * sizeof(qreal));
+  cudaMemset(densityImag, 0, densityNumElems * sizeof(qreal));
+
+  // index of the single density matrix elem to set non-zero
+  long long int densityDim = 1LL << qureg.numQubitsRepresented;
+  long long int densityInd = (densityDim + 1)*stateInd;
+
+  // give the specified classical state prob 1
+  if (qureg.chunkId == densityInd / densityNumElems){
+      qreal h_tmp = 1.0;
+      cudaMemcpy(densityReal[densityInd % densityNumElems], &h_tmp, 1 * sizeof(qreal), cudaMemcpyHostToDevice);
+      // densityReal[densityInd % densityNumElems] = 1.0;
+      // densityImag[densityInd % densityNumElems] = 0.0;
+  }
+}
+
 // densmatr
 // Not used at all
 void densmatr_initPureState(Qureg targetQureg, Qureg copyQureg){}
