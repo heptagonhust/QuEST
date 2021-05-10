@@ -528,7 +528,7 @@ void densmatr_initClassicalState (Qureg qureg, long long int stateInd)
   // give the specified classical state prob 1
   if (qureg.chunkId == densityInd / densityNumElems){
       qreal h_tmp = 1.0;
-      cudaMemcpy(densityReal[densityInd % densityNumElems], &h_tmp, 1 * sizeof(qreal), cudaMemcpyHostToDevice);
+      cudaMemcpy(&(densityReal[densityInd % densityNumElems]), &h_tmp, 1 * sizeof(qreal), cudaMemcpyHostToDevice);
       // densityReal[densityInd % densityNumElems] = 1.0;
       // densityImag[densityInd % densityNumElems] = 0.0;
   }
@@ -544,31 +544,8 @@ inline void zeroSomeAmps(Qureg qureg, long long int startInd, long long int numA
 __global__ void normaliseSomeAmpsKernel(Qureg qureg, qreal norm, long long int startInd, long long int numAmps) {
   long long int index = blockIdx.x*blockDim.x + threadIdx.x;
   if (index >= numAmps) return ;
-  qureg.stateVec.real[i+startInd] /= norm;
-  qureg.stateVec.imag[i+startInd] /= norm;
-}
-
-__global__ void alternateNormZeroingSomeAmpBlocksKernel(
-  Qureg qureg, qreal norm, int normFirst,
-  long long int startAmpInd, long long int numAmps, long long int blockSize
-) {
-  long long int numDubBlocks = numAmps / (2*blockSize);
-  long long int dubBlockInd = blockIdx.x*blockDim.x + threadIdx.x;
-  if (dubBlockInd >= numDubBlocks) return ;
-
-  long long int blockStartInd = startAmpInd + dubBlockInd*2*blockSize;
-
-  int threadsPerCUDABlock, CUDABlocks;
-  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
-  CUDABlocks = ceil(numAmps / (qreal) threadsPerCUDABlock);
-
-  if (normFirst) {
-    normaliseSomeAmpsKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg, norm, blockStartInd,blockSize); // |0><0|
-    zeroSomeAmps(     qureg,       blockStartInd + blockSize, blockSize);
-  } else {
-    zeroSomeAmps(     qureg,       blockStartInd,             blockSize);
-    normaliseSomeAmpsKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg, norm, blockStartInd + blockSize, blockSize); // |1><1|
-  }
+  qureg.stateVec.real[index+startInd] /= norm;
+  qureg.stateVec.imag[index+startInd] /= norm;
 }
 
 void alternateNormZeroingSomeAmpBlocks(
@@ -576,15 +553,29 @@ void alternateNormZeroingSomeAmpBlocks(
   long long int startAmpInd, long long int numAmps, long long int blockSize
 ) {
   long long int numDubBlocks = numAmps / (2*blockSize);
+  long long int blockStartInd;
 
   int threadsPerCUDABlock, CUDABlocks;
   threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
-  CUDABlocks = ceil(numDubBlocks / (qreal) threadsPerCUDABlock);
+  CUDABlocks = ceil(numAmps / (qreal) threadsPerCUDABlock);
 
-  alternateNormZeroingSomeAmpBlocksKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
-    qureg, norm, normFirst,
-    startAmpInd, numAmps, blockSize);
+  if (normFirst) {
+      long long int dubBlockInd;
+      for (dubBlockInd=0; dubBlockInd < numDubBlocks; dubBlockInd++) {
+          blockStartInd = startAmpInd + dubBlockInd*2*blockSize;
+          normaliseSomeAmpsKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg, norm, blockStartInd,blockSize); // |0><0|
+          zeroSomeAmps(     qureg,       blockStartInd + blockSize, blockSize);
+      }
+  } else {
+      long long int dubBlockInd;
+      for (dubBlockInd=0; dubBlockInd < numDubBlocks; dubBlockInd++) {
+          blockStartInd = startAmpInd + dubBlockInd*2*blockSize;
+          zeroSomeAmps(     qureg,       blockStartInd,             blockSize);
+          normaliseSomeAmpsKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg, norm, blockStartInd + blockSize, blockSize); // |1><1|
+      }
+  }
 }
+
 
 /** Renorms (/prob) every | * outcome * >< * outcome * | state, setting all others to zero */
 void densmatr_collapseToKnownProbOutcome(Qureg qureg, const int measureQubit, int outcome, qreal totalStateProb) {
