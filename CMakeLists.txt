@@ -12,12 +12,17 @@ project(QuEST_Project)
 # ----- USER OPTIONS ----------------------------------------------------------
 # -----------------------------------------------------------------------------
 
-set(RANDORM_SOURCE  "examples/random.c"  CACHE STRING "Source to build with QuEST library")
+set(WL1_SOURCE "examples/wl1.c"  CACHE STRING "workload source 1")
+set(WL2_SOURCE "examples/wl2.c" CACHE STRING "workload source 2")
+set(WL3_SOURCE "examples/wl3.c" CACHE STRING "workload source 3")
+set(WL4_SOURCE "examples/wl4.c" CACHE STRING "workload source 4")
+set(WL5_SOURCE "examples/wl5.c" CACHE STRING "workload source 5")
 
-set(QFT_SOURCE "examples/GHZ_QFT.c" CACHE STRING "QFT")
-
-set(RANDOM_OUTPUT_EXE   "demo"  CACHE STRING "Executable to compile to")
-set(QFT_OUTPUT_EXE "qft" CACHE STRING "qft executable")
+set(WL1_EXE "wl1"  CACHE STRING "workload 1 exe")
+set(WL2_EXE "wl2" CACHE STRING "workload 2 exe")
+set(WL3_EXE "wl3" CACHE STRING "workload 3 exe")
+set(WL4_EXE "wl4" CACHE STRING "workload 4 exe")
+set(WL5_EXE "wl5" CACHE STRING "workload 5 exe")
 
 add_compile_options(-mavx)
 add_compile_options(-mfma)
@@ -48,30 +53,51 @@ endif()
 # ----- USER EXECUTABLE -------------------------------------------------------
 # -----------------------------------------------------------------------------
 
-message(STATUS "Compiling ${RANDORM_SOURCE} to executable ${RANDOM_OUTPUT_EXE}")
-
-
 # Create user executable
-add_executable(${RANDOM_OUTPUT_EXE} ${RANDORM_SOURCE})
+add_executable(${WL1_EXE} ${WL1_SOURCE})
 
 # Link libraries to user executable, including QuEST library
 if (WIN32)
-    target_link_libraries(${RANDOM_OUTPUT_EXE} QuEST)
+    target_link_libraries(${WL1_EXE} QuEST)
 else ()
-    target_link_libraries(${RANDOM_OUTPUT_EXE} QuEST m)
+    target_link_libraries(${WL1_EXE} QuEST m)
 endif()
 
-message(STATUS "Compiling ${QFT_SOURCE} to executable ${QFT_OUTPUT_EXE}")
-
-
 # Create user executable
-add_executable(${QFT_OUTPUT_EXE} ${QFT_SOURCE})
+add_executable(${WL2_EXE} ${WL2_SOURCE})
 
 # Link libraries to user executable, including QuEST library
 if (WIN32)
-    target_link_libraries(${QFT_OUTPUT_EXE} QuEST)
+    target_link_libraries(${WL2_EXE} QuEST)
 else ()
-    target_link_libraries(${QFT_OUTPUT_EXE} QuEST m)
+    target_link_libraries(${WL2_EXE} QuEST m)
+endif()
+
+add_executable(${WL3_EXE} ${WL3_SOURCE})
+
+# Link libraries to user executable, including QuEST library
+if (WIN32)
+    target_link_libraries(${WL3_EXE} QuEST)
+else ()
+    target_link_libraries(${WL3_EXE} QuEST m)
+endif()
+
+add_executable(${WL4_EXE} ${WL4_SOURCE})
+
+# Link libraries to user executable, including QuEST library
+if (WIN32)
+    target_link_libraries(${WL4_EXE} QuEST)
+else ()
+    target_link_libraries(${WL4_EXE} QuEST m)
+endif()
+
+add_executable(${WL5_EXE} ${WL5_SOURCE})
+
+# Link libraries to user executable, including QuEST library
+if (WIN32)
+    target_link_libraries(${WL5_EXE} QuEST)
+else ()
+    target_link_libraries(${WL5_EXE} QuEST m)
 endif()
 
 # -----------------------------------------------------------------------------
