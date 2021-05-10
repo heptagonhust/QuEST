@@ -528,7 +528,7 @@ void densmatr_initClassicalState (Qureg qureg, long long int stateInd)
   // give the specified classical state prob 1
   if (qureg.chunkId == densityInd / densityNumElems){
       qreal h_tmp = 1.0;
-      cudaMemcpy(&(densityReal[densityInd % densityNumElems]), &h_tmp, 1 * sizeof(qreal), cudaMemcpyHostToDevice);
+      cudaMemcpy(&(densityReal[densityInd % densityNumElems]), &h_tmp, 1 * sizeof(qreal), cudaMemcpyDefault);
       // densityReal[densityInd % densityNumElems] = 1.0;
       // densityImag[densityInd % densityNumElems] = 0.0;
   }

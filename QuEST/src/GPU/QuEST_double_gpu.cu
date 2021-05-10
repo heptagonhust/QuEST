@@ -255,7 +255,7 @@ qreal statevec_getRealAmp(Qureg qureg, long long int index){
   if (qureg.chunkId==chunkId){
       // el = qureg.stateVec.real[index-chunkId*qureg.numAmpsPerChunk];
       cudaMemcpy(el, &(qureg.stateVec.real[index-chunkId*qureg.numAmpsPerChunk]), 
-        sizeof(*(qureg.stateVec.real)), cudaMemcpyDeviceToDevice);
+        sizeof(*(qureg.stateVec.real)), cudaMemcpyDefault);
   }
   cuMPI_Bcast(el, 1, cuMPI_QuEST_REAL, chunkId, cuMPI_COMM_WORLD);
 
@@ -275,7 +275,7 @@ qreal statevec_getImagAmp(Qureg qureg, long long int index){
   if (qureg.chunkId==chunkId){
       //el = qureg.stateVec.imag[index-chunkId*qureg.numAmpsPerChunk];
       cudaMemcpy(el, &(qureg.stateVec.imag[index-chunkId*qureg.numAmpsPerChunk]), 
-        sizeof(*(qureg.stateVec.imag)), cudaMemcpyDeviceToDevice);
+        sizeof(*(qureg.stateVec.imag)), cudaMemcpyDefault);
   }
   cuMPI_Bcast(el, 1, cuMPI_QuEST_REAL, chunkId, cuMPI_COMM_WORLD);
 
@@ -1921,11 +1921,11 @@ void statevec_createQureg(Qureg *qureg, int numQubits, QuESTEnv env)
     //     qureg->pairStateVec.imag = (qreal*) malloc(numAmpsPerRank * sizeof(*(qureg->pairStateVec.imag)));
     // }
 
-    cudaMalloc(&(qureg->stateVec.real), numAmpsPerRank * sizeof(*(qureg->stateVec.real)));
-    cudaMalloc(&(qureg->stateVec.imag), numAmpsPerRank * sizeof(*(qureg->stateVec.imag)));
+    cudaMallocManaged(&(qureg->stateVec.real), numAmpsPerRank * sizeof(*(qureg->stateVec.real)));
+    cudaMallocManaged(&(qureg->stateVec.imag), numAmpsPerRank * sizeof(*(qureg->stateVec.imag)));
     if (env.numRanks > 1) {
-      cudaMalloc(&(qureg->pairStateVec.real), numAmpsPerRank * sizeof(*(qureg->pairStateVec.real)));
-      cudaMalloc(&(qureg->pairStateVec.imag), numAmpsPerRank * sizeof(*(qureg->pairStateVec.imag)));
+      cudaMallocManaged(&(qureg->pairStateVec.real), numAmpsPerRank * sizeof(*(qureg->pairStateVec.real)));
+      cudaMallocManaged(&(qureg->pairStateVec.imag), numAmpsPerRank * sizeof(*(qureg->pairStateVec.imag)));
     }
 
     // check gpu memory allocation was successful
@@ -2033,7 +2033,7 @@ void statevec_initZeroState(Qureg qureg)
 
     // zero state |0000..0000> has probability 1
     qreal tmp = 1.0;
-    cudaMemcpy(qureg.stateVec.real, &tmp, 1 * sizeof(qreal), cudaMemcpyHostToDevice);
+    cudaMemcpy(qureg.stateVec.real, &tmp, 1 * sizeof(qreal), cudaMemcpyDefault);
   } else {
 
     statevec_initBlankState(qureg);
@@ -2096,9 +2096,9 @@ int statevec_initStateFromSingleFile(Qureg *qureg, char filename[200], QuESTEnv 
   cudaDeviceSynchronize();
   if (DEBUG) printf("Copying data to GPU\n");
   cudaMemcpy(qureg->stateVec.real, tempStateVecReal, 
-          chunkSize*sizeof(qreal), cudaMemcpyHostToDevice);
+          chunkSize*sizeof(qreal), cudaMemcpyDefault);
   cudaMemcpy(qureg->stateVec.imag, tempStateVecImag, 
-          chunkSize*sizeof(qreal), cudaMemcpyHostToDevice);
+          chunkSize*sizeof(qreal), cudaMemcpyDefault);
   if (DEBUG) printf("Finished copying data to GPU\n");
 
 
@@ -2139,13 +2139,11 @@ void statevec_setAmps(Qureg qureg, long long int startInd, qreal* reals, qreal* 
       cudaMemcpy(
           vecRe + localStartInd,
           reals + localStartInd + offset,
-          copyCount,
-          cudaMemcpyHostToDevice);
+          copyCount, cudaMemcpyDefault);
       cudaMemcpy(
           vecIm + localStartInd,
           imags + localStartInd + offset,
-          copyCount,
-          cudaMemcpyHostToDevice);
+          copyCount, cudaMemcpyDefault);
   }
   // for (index=localStartInd; index < localEndInd; index++) {
   //     vecRe[index] = reals[index + offset];

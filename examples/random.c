@@ -23,7 +23,7 @@ int main (int narg, char *argv[]) {
         return 0;
     }
 
-    Qureg q = createQureg(30, Env);
+    Qureg q = createQureg(32, Env);
 
     float q_measure[30];
     tGate(q, 25);
