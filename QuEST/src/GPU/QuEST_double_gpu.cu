@@ -1630,8 +1630,55 @@ qreal statevec_calcProbOfOutcome(Qureg qureg, const int measureQubit, int outcom
   return h_totalStateProb;
 }
 
+
+
+__global__ void statevec_collapseToKnownProbOutcomeDistributedRenormKernel(
+  Qureg qureg, const int measureQubit, const qreal totalProbability)
+{
+  // ----- temp variables
+  long long int thisTask = blockIdx.x*blockDim.x + threadIdx.x;
+  long long int numTasks=qureg.numAmpsPerChunk;
+  
+  if (thisTask>=numTasks) return;
+
+  qreal renorm=1/sqrt(totalProbability);
+
+  qreal *stateVecReal = qureg.stateVec.real;
+  qreal *stateVecImag = qureg.stateVec.imag;
+
+  stateVecReal[thisTask] = stateVecReal[thisTask]*renorm;
+  stateVecImag[thisTask] = stateVecImag[thisTask]*renorm;
+}
+
+/** Renormalise parts of the state vector where measureQubit=0 or 1, based on the total probability of that qubit being
+ *  in state 0 or 1.
+ *  Measure in Zero performs an irreversible change to the state vector: it updates the vector according
+ *  to the event that the value 'outcome' has been measured on the qubit indicated by measureQubit (where 
+ *  this label starts from 0, of course). It achieves this by setting all inconsistent amplitudes to 0 and 
+ *  then renormalising based on the total probability of measuring measureQubit=0 if outcome=0 and
+ *  measureQubit=1 if outcome=1.
+ *  In the distributed version, one block (with measureQubit=0 in the first half of the block and
+ *  measureQubit=1 in the second half of the block) is spread over multiple chunks, meaning that each chunks performs
+ *  only renormalisation or only setting amplitudes to 0. This function handles the renormalisation.
+ *  
+ *  @param[in,out] qureg object representing the set of qubits
+ *  @param[in] measureQubit qubit to measure
+ *  @param[in] totalProbability probability of qubit measureQubit being zero
+ */
+void statevec_collapseToKnownProbOutcomeDistributedRenorm (Qureg qureg, const int measureQubit, const qreal totalProbability)
+{
+  // stage 1 done!
+  int threadsPerCUDABlock, CUDABlocks;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
+  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
+  statevec_collapseToKnownProbOutcomeDistributedRenormKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
+    qureg, measureQubit, totalProbability);
+}
+
 void statevec_collapseToKnownProbOutcome(Qureg qureg, const int measureQubit, int outcome, qreal totalStateProb)
 {
+  // stage 1 done!
+
   //!!simple return in cpu_local
 
   int skipValuesWithinRank = halfMatrixBlockFitsInChunk(qureg.numAmpsPerChunk, measureQubit);
@@ -1642,12 +1689,18 @@ void statevec_collapseToKnownProbOutcome(Qureg qureg, const int measureQubit, in
       // chunk has amps for q=0
       if (outcome==0) statevec_collapseToKnownProbOutcomeDistributedRenorm(qureg, measureQubit,
               totalStateProb);
-      else statevec_collapseToOutcomeDistributedSetZero(qureg);
+      else {
+        cudaMemset(qureg.stateVec.real, 0, qureg.numAmpsPerChunk * sizeof(qreal));
+        cudaMemset(qureg.stateVec.imag, 0, qureg.numAmpsPerChunk * sizeof(qreal));
+      }
     } else {
         // chunk has amps for q=1
       if (outcome==1) statevec_collapseToKnownProbOutcomeDistributedRenorm(qureg, measureQubit,
               totalStateProb);
-      else statevec_collapseToOutcomeDistributedSetZero(qureg);
+      else {
+        cudaMemset(qureg.stateVec.real, 0, qureg.numAmpsPerChunk * sizeof(qreal));
+        cudaMemset(qureg.stateVec.imag, 0, qureg.numAmpsPerChunk * sizeof(qreal));
+      }
     }
   }
 }
@@ -1675,31 +1728,57 @@ void seedQuESTDefault(){
   init_by_array(key, 2);
 }
 
-/** returns -1 if this node contains no amplitudes where qb1 and qb2
- * have opposite parity, otherwise returns the global index of one
- * of such contained amplitudes (not necessarily the first)
+
+__global__ void statevec_swapQubitAmpsDistributedKernel(
+  Qureg qureg, int pairRank, int qb1, int qb2) {
+    
+  // can't use qureg.stateVec as a private OMP var
+  qreal *reVec = qureg.stateVec.real;
+  qreal *imVec = qureg.stateVec.imag;
+  qreal *rePairVec = qureg.pairStateVec.real;
+  qreal *imPairVec = qureg.pairStateVec.imag;
+  
+  long long int numLocalAmps = qureg.numAmpsPerChunk;
+  long long int globalStartInd = qureg.chunkId * numLocalAmps;
+  long long int pairGlobalStartInd = pairRank * numLocalAmps;
+
+  long long int localInd = blockIdx.x*blockDim.x + threadIdx.x;
+  if (localInd>=numLocalAmps) return;
+
+  long long int globalInd;
+  long long int pairLocalInd, pairGlobalInd;
+      
+  globalInd = globalStartInd + localInd;
+  if (isOddParity(globalInd, qb1, qb2)) {
+      
+      pairGlobalInd = flipBit(flipBit(globalInd, qb1), qb2);
+      pairLocalInd = pairGlobalInd - pairGlobalStartInd;
+      
+      reVec[localInd] = rePairVec[pairLocalInd];
+      imVec[localInd] = imPairVec[pairLocalInd];
+  }
+}
+
+/** qureg.pairStateVec contains the entire set of amplitudes of the paired node
+ * which includes the set of all amplitudes which need to be swapped between
+ * |..0..1..> and |..1..0..>
  */
- long long int getGlobalIndOfOddParityInChunk(Qureg qureg, int qb1, int qb2) {
-  long long int chunkStartInd = qureg.numAmpsPerChunk * qureg.chunkId;
-  long long int chunkEndInd = chunkStartInd + qureg.numAmpsPerChunk; // exclusive
-  long long int oddParityInd;
-
-  if (extractBitOnCPU(qb1, chunkStartInd) != extractBitOnCPU(qb2, chunkStartInd))
-      return chunkStartInd;
-
-  oddParityInd = flipBitOnCPU(chunkStartInd, qb1);
-  if (oddParityInd >= chunkStartInd && oddParityInd < chunkEndInd)
-      return oddParityInd;
-
-  oddParityInd = flipBitOnCPU(chunkStartInd, qb2);
-  if (oddParityInd >= chunkStartInd && oddParityInd < chunkEndInd)
-      return oddParityInd;
-
-  return -1;
+ void statevec_swapQubitAmpsDistributed(Qureg qureg, int pairRank, int qb1, int qb2) {
+    
+  int threadsPerCUDABlock, CUDABlocks;
+  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
+  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
+  statevec_swapQubitAmpsDistributedKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
+    qureg, 
+    pairRank, 
+    qb1, 
+    qb2
+  );
 }
 
 void statevec_swapQubitAmps(Qureg qureg, int qb1, int qb2) {
 
+  // stage 1 done!
   //!!simple return in cpu_local
 
   // perform locally if possible
@@ -1729,6 +1808,7 @@ void statevec_swapQubitAmps(Qureg qureg, int qb1, int qb2) {
  */
  void statevec_multiControlledTwoQubitUnitary(Qureg qureg, long long int ctrlMask, const int q1, const int q2, ComplexMatrix4 u) {
 
+  // stage 1 done!
   //!!simple return in cpu_local 
 
   int q1FitsInNode = halfMatrixBlockFitsInChunk(qureg.numAmpsPerChunk, q1);
@@ -1770,6 +1850,8 @@ void statevec_swapQubitAmps(Qureg qureg, int qb1, int qb2) {
  */
  void statevec_multiControlledMultiQubitUnitary(Qureg qureg, long long int ctrlMask, int* targs, const int numTargs, ComplexMatrixN u) {
 
+  // stage 1 done!
+  
   //!!simple return in cpu_local
   // only these functions are related to gpu process:
   // statevec_swapQubitAmps()
@@ -1932,44 +2014,12 @@ void statevec_destroyQureg(Qureg qureg, QuESTEnv env)
     // ? cudaFree(qureg.firstLevelReduction.real);
 }
 
-__global__ void statevec_initBlankStateKernel(long long int stateVecSize, qreal *stateVecReal, qreal *stateVecImag){
-  long long int index;
-
-  // initialise the statevector to be all-zeros
-  index = blockIdx.x*blockDim.x + threadIdx.x;
-  if (index>=stateVecSize) return;
-  stateVecReal[index] = 0.0;
-  stateVecImag[index] = 0.0;
-}
-
 void statevec_initBlankState(Qureg qureg)
 {
   // stage 1 done!
 
-  int threadsPerCUDABlock, CUDABlocks;
-  threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
-  CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
-  statevec_initBlankStateKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
-      qureg.numAmpsPerChunk, 
-      qureg.stateVec.real, 
-      qureg.stateVec.imag);
-}
-
-// especially for qureg.chunkId == 0
-__global__ void statevec_initZeroStateKernel(long long int stateVecSize, qreal *stateVecReal, qreal *stateVecImag){
-  long long int index;
-
-  // initialise the state to |0000..0000>
-  index = blockIdx.x*blockDim.x + threadIdx.x;
-  if (index>=stateVecSize) return;
-  stateVecReal[index] = 0.0;
-  stateVecImag[index] = 0.0;
-
-  if (index==0){
-      // zero state |0000..0000> has probability 1
-      stateVecReal[0] = 1.0;
-      stateVecImag[0] = 0.0;
-  }
+  cudaMemset(qureg.stateVec.real, 0, qureg.numAmpsPerChunk * sizeof(qreal));
+  cudaMemset(qureg.stateVec.imag, 0, qureg.numAmpsPerChunk * sizeof(qreal));
 }
 
 void statevec_initZeroState(Qureg qureg)
@@ -1978,16 +2028,12 @@ void statevec_initZeroState(Qureg qureg)
 
   if (qureg.chunkId==0) {
 
-    int threadsPerCUDABlock, CUDABlocks;
-    threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
-    CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
+    cudaMemset(qureg.stateVec.real, 0, qureg.numAmpsPerChunk * sizeof(qreal));
+    cudaMemset(qureg.stateVec.imag, 0, qureg.numAmpsPerChunk * sizeof(qreal));
 
     // zero state |0000..0000> has probability 1
-    statevec_initZeroStateKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
-      qureg.numAmpsPerChunk, 
-      qureg.stateVec.real, 
-      qureg.stateVec.imag
-    );
+    qreal tmp = 1.0;
+    cudaMemcpy(qureg.stateVec.real, &tmp, 1 * sizeof(qreal), cudaMemcpyHostToDevice);
   } else {
 
     statevec_initBlankState(qureg);
@@ -2280,6 +2326,71 @@ void statevec_initClassicalState(Qureg qureg, long long int stateInd)
       );
   }
 }
+
+
+#ifdef __cplusplus
+}
+#endif
+
+
+//
+// Density Matrix Functions
+//
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/** This copies/clones vec (a statevector) into every node's matr pairState.
+ * (where matr is a density matrix or equal number of qubits as vec) */
+ void NOT_USED_AT_ALL copyVecIntoMatrixPairState(Qureg matr, Qureg vec) {
+
+  // stage 1 done!
+  // cuMPI done!
+    
+  // Remember that for every amplitude that `vec` stores on the node,
+  // `matr` stores an entire column. Ergo there are always an integer
+  // number (in fact, a power of 2) number of  `matr`s columns on each node.
+  // Since the total size of `vec` (between all nodes) is one column
+  // and each node stores (possibly) multiple columns (vec.numAmpsPerChunk as many), 
+  // `vec` can be fit entirely inside a single node's matr.pairStateVec (with excess!)
+  
+  // copy this node's vec segment into this node's matr pairState (in the right spot)
+  long long int numLocalAmps = vec.numAmpsPerChunk;
+  long long int myOffset = vec.chunkId * numLocalAmps;
+  cudaMemcpy(&matr.pairStateVec.real[myOffset], vec.stateVec.real, numLocalAmps * sizeof(qreal), cudaMemcpyDeviceToDevice);
+  cudaMemcpy(&matr.pairStateVec.imag[myOffset], vec.stateVec.imag, numLocalAmps * sizeof(qreal), cudaMemcpyDeviceToDevice);
+  
+  // we now want to share this node's vec segment with other node, so that 
+  // vec is cloned in every node's matr.pairStateVec 
+
+  // work out how many messages needed to send vec chunks (2GB limit)
+  long long int maxMsgSize = cuMPI_MAX_AMPS_IN_MSG;
+  if (numLocalAmps < maxMsgSize) 
+      maxMsgSize = numLocalAmps;
+  // safely assume MPI_MAX... = 2^n, so division always exact:
+  int numMsgs = numLocalAmps / maxMsgSize;
+  
+  // every node gets a turn at being the broadcaster
+  for (int broadcaster=0; broadcaster < vec.numChunks; broadcaster++) {
+      
+      long long int otherOffset = broadcaster * numLocalAmps;
+  
+      // every node sends a slice of qureg's pairState to every other
+      for (int i=0; i< numMsgs; i++) {
+  
+          // by sending that slice in further slices (due to bandwidth limit)
+          cuMPI_Bcast(
+              &matr.pairStateVec.real[otherOffset + i*maxMsgSize], 
+              maxMsgSize,  cuMPI_QuEST_REAL, broadcaster, cuMPI_COMM_WORLD);
+          cuMPI_Bcast(
+              &matr.pairStateVec.imag[otherOffset + i*maxMsgSize], 
+              maxMsgSize,  cuMPI_QuEST_REAL, broadcaster, cuMPI_COMM_WORLD);
+      }
+  }
+}
+
+
 
 
 #ifdef __cplusplus

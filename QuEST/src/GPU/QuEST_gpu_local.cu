@@ -1,93 +1,12 @@
 #include "QuEST_gpu_internal.h"
 
-/*
- * state vector and density matrix operations 
- */
+//
+// State Vector Operations
+//
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-qreal statevec_getRealAmpLocal(Qureg qureg, long long int index){
-    // stage 1 done!
-    qreal el=0;
-    cudaMemcpy(&el, &(qureg.stateVec.real[index]), 
-            sizeof(*(qureg.stateVec.real)), cudaMemcpyDeviceToHost);
-    return el;
-}
-
-qreal statevec_getImagAmpLocal(Qureg qureg, long long int index){
-    // stage 1 done!
-    qreal el=0;
-    cudaMemcpy(&el, &(qureg.stateVec.imag[index]), 
-            sizeof(*(qureg.stateVec.imag)), cudaMemcpyDeviceToHost);
-    return el;
-}
-
-__global__ void statevec_initDebugStateKernel(long long int stateVecSize, qreal *stateVecReal, qreal *stateVecImag){
-    long long int index;
-
-    index = blockIdx.x*blockDim.x + threadIdx.x;
-    if (index>=stateVecSize) return;
-
-    stateVecReal[index] = (index*2.0)/10.0;
-    stateVecImag[index] = (index*2.0+1.0)/10.0;
-}
-
-void statevec_initDebugState(Qureg qureg)
-{
-    int threadsPerCUDABlock, CUDABlocks;
-    threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
-    CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
-    statevec_initDebugStateKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
-        qureg.numAmpsPerChunk,
-        qureg.stateVec.real, 
-        qureg.stateVec.imag);
-}
-
-__global__ void statevec_initStateOfSingleQubitKernel(long long int stateVecSize, qreal *stateVecReal, qreal *stateVecImag, int qubitId, int outcome){
-    long long int index;
-    int bit;
-
-    index = blockIdx.x*blockDim.x + threadIdx.x;
-    if (index>=stateVecSize) return;
-
-    qreal normFactor = 1.0/sqrt((qreal)stateVecSize/2);
-    bit = extractBit(qubitId, index);
-    if (bit==outcome) {
-        stateVecReal[index] = normFactor;
-        stateVecImag[index] = 0.0;
-    } else {
-        stateVecReal[index] = 0.0;
-        stateVecImag[index] = 0.0;
-    }
-}
-
-void statevec_initStateOfSingleQubit(Qureg *qureg, int qubitId, int outcome)
-{
-    int threadsPerCUDABlock, CUDABlocks;
-    threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
-    CUDABlocks = ceil((qreal)(qureg->numAmpsPerChunk)/threadsPerCUDABlock);
-    statevec_initStateOfSingleQubitKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg->numAmpsPerChunk, qureg->stateVec.real, qureg->stateVec.imag, qubitId, outcome);
-}
-
-int statevec_compareStates(Qureg mq1, Qureg mq2, qreal precision){
-    qreal diff;
-    int chunkSize = mq1.numAmpsPerChunk;
-
-    copyStateFromGPU(mq1);
-    copyStateFromGPU(mq2);
-
-    for (int i=0; i<chunkSize; i++){
-        diff = mq1.stateVec.real[i] - mq2.stateVec.real[i];
-        if (diff<0) diff *= -1;
-        if (diff>precision) return 0;
-        diff = mq1.stateVec.imag[i] - mq2.stateVec.imag[i];
-        if (diff<0) diff *= -1;
-        if (diff>precision) return 0;
-    }
-    return 1;
-}
 
 __global__ void statevec_compactUnitaryKernel (Qureg qureg, const int rotQubit, Complex alpha, Complex beta){
     // ----- sizes
@@ -301,11 +220,17 @@ __global__ void statevec_multiControlledMultiQubitUnitaryKernel(
     long long int numTasks = qureg.numAmpsPerChunk >> numTargs; // kernel called on every 1 in 2^numTargs amplitudes
     if (thisTask>=numTasks) return;
     
+    // the global (between all nodes) index of this node's start index
+    long long int globalIndStart = qureg.chunkId*qureg.numAmpsPerChunk;
+    long long int thisGlobalInd00; // the global (between all nodes) index of this thread's |..0..0..> state
+
+    // this thread's index of |..0..0..> (target qubits = 0)
     // find this task's start index (where all targs are 0)
     long long int ind00 = insertZeroBits(thisTask, targs, numTargs);
     
     // this task only modifies amplitudes if control qubits are 1 for this state
-    if (ctrlMask && (ctrlMask&ind00) != ctrlMask)
+    thisGlobalInd00 = ind00 + globalIndStart;
+    if (ctrlMask && ((ctrlMask & thisGlobalInd00) != ctrlMask))
         return;
         
     qreal *reVec = qureg.stateVec.real;
@@ -352,6 +277,9 @@ __global__ void statevec_multiControlledMultiQubitUnitaryKernel(
 
 void statevec_multiControlledMultiQubitUnitaryLocal(Qureg qureg, long long int ctrlMask, int* targs, const int numTargs, ComplexMatrixN u)
 {
+    // stage 1 done!
+    // chunkId done!
+    
     int threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
     int CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>numTargs)/threadsPerCUDABlock);
     
@@ -421,10 +349,16 @@ __global__ void statevec_multiControlledTwoQubitUnitaryKernel(Qureg qureg, long 
     long long int ind00, ind01, ind10, ind11;
     ind00 = insertTwoZeroBits(thisTask, q1, q2);
     
+    // the global (between all nodes) index of this node's start index
+    long long int globalIndStart = qureg.chunkId*qureg.numAmpsPerChunk;
+    long long int thisGlobalInd00 = ind00 + globalIndStart;
+
+    // skip amplitude if controls aren't in 1 state (overloaded for speed)
     // modify only if control qubits are 1 for this state
-    if (ctrlMask && (ctrlMask&ind00) != ctrlMask)
+    if (ctrlMask && ((ctrlMask & thisGlobalInd00) != ctrlMask))
         return;
     
+    // inds of |..0..1..>, |..1..0..> and |..1..1..>
     ind01 = flipBit(ind00, q1);
     ind10 = flipBit(ind00, q2);
     ind11 = flipBit(ind01, q2);
@@ -485,6 +419,9 @@ __global__ void statevec_multiControlledTwoQubitUnitaryKernel(Qureg qureg, long 
 
 void statevec_multiControlledTwoQubitUnitaryLocal(Qureg qureg, long long int ctrlMask, const int q1, const int q2, ComplexMatrix4 u)
 {
+    // stage 1 done!
+    // chunkId done!
+
     int threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
     int CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>2)/threadsPerCUDABlock); // one kernel eval for every 4 amplitudes
     statevec_multiControlledTwoQubitUnitaryKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg, ctrlMask, q1, q2, argifyMatrix4(u));
@@ -683,6 +620,9 @@ __global__ void statevec_pauliXKernel(Qureg qureg, const int targetQubit){
 
 void statevec_pauliXLocal(Qureg qureg, const int targetQubit) 
 {
+    // stage 1 done!
+    // chunkId done!
+
     int threadsPerCUDABlock, CUDABlocks;
     threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
     CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);
@@ -716,6 +656,7 @@ __global__ void statevec_pauliYKernel(Qureg qureg, const int targetQubit, const 
 
 void statevec_pauliYLocal(Qureg qureg, const int targetQubit) 
 {
+    // stage 1 done!
     // chunkID done!
 
     int threadsPerCUDABlock, CUDABlocks;
@@ -726,6 +667,7 @@ void statevec_pauliYLocal(Qureg qureg, const int targetQubit)
 
 void statevec_pauliYConjLocal(Qureg qureg, const int targetQubit) 
 {
+    // stage 1 done!
     // chunkID done!
 
     int threadsPerCUDABlock, CUDABlocks;
@@ -774,6 +716,7 @@ __global__ void statevec_controlledPauliYKernel(Qureg qureg, const int controlQu
 
 void statevec_controlledPauliYLocal(Qureg qureg, const int controlQubit, const int targetQubit)
 {
+    // stage 1 done!
     // chunkID done!
 
     int conjFactor = 1;
@@ -785,6 +728,7 @@ void statevec_controlledPauliYLocal(Qureg qureg, const int controlQubit, const i
 
 void statevec_controlledPauliYConjLocal(Qureg qureg, const int controlQubit, const int targetQubit)
 {
+    // stage 1 done!
     // chunkID done!
 
     int conjFactor = -1;
@@ -792,257 +736,6 @@ void statevec_controlledPauliYConjLocal(Qureg qureg, const int controlQubit, con
     threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
     CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
     statevec_controlledPauliYKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg, controlQubit, targetQubit, conjFactor);
-}
-
-__global__ void statevec_phaseShiftByTermKernel(Qureg qureg, const int targetQubit, qreal cosAngle, qreal sinAngle) {
-    // stage 1 done!
-
-    // !only for single gpu
-    // long long int sizeBlock, sizeHalfBlock, thisBlock;
-    // long long int indexUp, indexLo;
-
-    qreal stateRealLo, stateImagLo;
-    long long int thisTask, exactTask; // exactTask is global rank for distributed gpu.
-    // const long long int numTasks = qureg.numAmpsPerChunk >> 1; // !only for single gpu
-    const long long int numTasks = qureg.numAmpsPerChunk;
-
-    // distributed gpu
-    const long long int sizeChunk = qureg.numAmpsPerChunk;
-    const long long int chunkId = qureg.chunkId;
-
-    /* yh comment */
-    /* sizeHalfBlock & sizeBlock using binary count trick
-        e.g. qubit num = 3, target qubit = 1 (id begin with 0)
-        000, 001 the center bit (qubit1) is 0 occur continuously for 2 times
-        010, 011 when the center bit is 1, the next related bit(#) will add sizeBlock(=4) to index
-        100, 101
-        #110, 111
-    */
-    // !only for single gpu
-    // sizeHalfBlock = 1LL << targetQubit;
-    // sizeBlock     = 2LL * sizeHalfBlock;
-
-    qreal *stateVecReal = qureg.stateVec.real;
-    qreal *stateVecImag = qureg.stateVec.imag;
-
-    // thisTask = blockIdx.x*blockDim.x + threadIdx.x;
-    // if (thisTask>=numTasks) return;
-    // thisBlock   = thisTask / sizeHalfBlock;
-    // indexUp     = thisBlock*sizeBlock + thisTask%sizeHalfBlock;
-    // indexLo     = indexUp + sizeHalfBlock;
-    
-    thisTask = blockIdx.x*blockDim.x + threadIdx.x;
-    if (thisTask>=numTasks) return;
-    exactTask = thisTask + chunkId*sizeChunk;
-
-    if ( extractBit(targetQubit, exactTask) ) {
-        
-        stateRealLo = stateVecReal[thisTask];
-        stateImagLo = stateVecImag[thisTask];
-
-        stateVecReal[thisTask] = cosAngle*stateRealLo - sinAngle*stateImagLo;
-        stateVecImag[thisTask] = sinAngle*stateRealLo + cosAngle*stateImagLo;
-    }
-}
-
-void statevec_phaseShiftByTerm(Qureg qureg, const int targetQubit, Complex term)
-{   
-    // stage 1 done!
-    qreal cosAngle = term.real;
-    qreal sinAngle = term.imag;
-    
-    int threadsPerCUDABlock, CUDABlocks;
-    threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
-    
-    // CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);
-    CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
-    statevec_phaseShiftByTermKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg, targetQubit, cosAngle, sinAngle);
-}
-
-__global__ void statevec_controlledPhaseShiftKernel(Qureg qureg, const int idQubit1, const int idQubit2, qreal cosAngle, qreal sinAngle)
-{
-    long long int index;
-    long long int stateVecSize;
-    int bit1, bit2;
-    qreal stateRealLo, stateImagLo;
-
-    stateVecSize = qureg.numAmpsPerChunk;
-    qreal *stateVecReal = qureg.stateVec.real;
-    qreal *stateVecImag = qureg.stateVec.imag;
-
-    index = blockIdx.x*blockDim.x + threadIdx.x;
-    if (index>=stateVecSize) return;
-
-    bit1 = extractBit (idQubit1, index);
-    bit2 = extractBit (idQubit2, index);
-    if (bit1 && bit2) {
-        stateRealLo = stateVecReal[index];
-        stateImagLo = stateVecImag[index];
-        
-        stateVecReal[index] = cosAngle*stateRealLo - sinAngle*stateImagLo;
-        stateVecImag[index] = sinAngle*stateRealLo + cosAngle*stateImagLo;
-    }
-}
-
-void statevec_controlledPhaseShift(Qureg qureg, const int idQubit1, const int idQubit2, qreal angle)
-{
-    qreal cosAngle = cos(angle);
-    qreal sinAngle = sin(angle);
-    
-    int threadsPerCUDABlock, CUDABlocks;
-    threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
-    CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
-    statevec_controlledPhaseShiftKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg, idQubit1, idQubit2, cosAngle, sinAngle);
-}
-
-__global__ void statevec_multiControlledPhaseShiftKernel(Qureg qureg, long long int mask, qreal cosAngle, qreal sinAngle) {
-    qreal stateRealLo, stateImagLo;
-    long long int index;
-    long long int stateVecSize;
-
-    stateVecSize = qureg.numAmpsPerChunk;
-    qreal *stateVecReal = qureg.stateVec.real;
-    qreal *stateVecImag = qureg.stateVec.imag;
-    
-    index = blockIdx.x*blockDim.x + threadIdx.x;
-    if (index>=stateVecSize) return;
-
-    if (mask == (mask & index) ){
-        stateRealLo = stateVecReal[index];
-        stateImagLo = stateVecImag[index];
-        stateVecReal[index] = cosAngle*stateRealLo - sinAngle*stateImagLo;
-        stateVecImag[index] = sinAngle*stateRealLo + cosAngle*stateImagLo;
-    }
-}
-
-void statevec_multiControlledPhaseShift(Qureg qureg, int *controlQubits, int numControlQubits, qreal angle)
-{   
-    qreal cosAngle = cos(angle);
-    qreal sinAngle = sin(angle);
-
-    long long int mask = getQubitBitMask(controlQubits, numControlQubits);
-        
-    int threadsPerCUDABlock, CUDABlocks;
-    threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
-    CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
-    statevec_multiControlledPhaseShiftKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg, mask, cosAngle, sinAngle);
-}
-
-__global__ void statevec_multiRotateZKernel(Qureg qureg, long long int mask, qreal cosAngle, qreal sinAngle) {
-    
-    long long int stateVecSize = qureg.numAmpsPerChunk;
-    long long int index = blockIdx.x*blockDim.x + threadIdx.x;
-    if (index>=stateVecSize) return;
-    
-    qreal *stateVecReal = qureg.stateVec.real;
-    qreal *stateVecImag = qureg.stateVec.imag;
-    
-    int fac = getBitMaskParity(mask & index)? -1 : 1;
-    qreal stateReal = stateVecReal[index];
-    qreal stateImag = stateVecImag[index];
-    
-    stateVecReal[index] = cosAngle*stateReal + fac * sinAngle*stateImag;
-    stateVecImag[index] = - fac * sinAngle*stateReal + cosAngle*stateImag;  
-}
-
-void statevec_multiRotateZ(Qureg qureg, long long int mask, qreal angle)
-{   
-    qreal cosAngle = cos(angle/2.0);
-    qreal sinAngle = sin(angle/2.0);
-        
-    int threadsPerCUDABlock, CUDABlocks;
-    threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
-    CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
-    statevec_multiRotateZKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg, mask, cosAngle, sinAngle);
-}
-
-
-qreal statevec_calcTotalProbLocal(Qureg qureg){
-    /* IJB - implemented using Kahan summation for greater accuracy at a slight floating
-       point operation overhead. For more details see https://en.wikipedia.org/wiki/Kahan_summation_algorithm */
-    /* Don't change the bracketing in this routine! */
-    qreal pTotal=0;
-    qreal y, t, c;
-    long long int index;
-    long long int numAmpsPerRank = qureg.numAmpsPerChunk;
-
-    copyStateFromGPU(qureg);
-
-    c = 0.0;
-    for (index=0; index<numAmpsPerRank; index++){
-        /* Perform pTotal+=qureg.stateVec.real[index]*qureg.stateVec.real[index]; by Kahan */
-        // pTotal+=qureg.stateVec.real[index]*qureg.stateVec.real[index];
-        y = qureg.stateVec.real[index]*qureg.stateVec.real[index] - c;
-        t = pTotal + y;
-        c = ( t - pTotal ) - y;
-        pTotal = t;
-
-        /* Perform pTotal+=qureg.stateVec.imag[index]*qureg.stateVec.imag[index]; by Kahan */
-        //pTotal+=qureg.stateVec.imag[index]*qureg.stateVec.imag[index];
-        y = qureg.stateVec.imag[index]*qureg.stateVec.imag[index] - c;
-        t = pTotal + y;
-        c = ( t - pTotal ) - y;
-        pTotal = t;
-
-
-    }
-    return pTotal;
-}
-
-__global__ void statevec_controlledPhaseFlipKernel(Qureg qureg, const int idQubit1, const int idQubit2)
-{
-    long long int index;
-    long long int stateVecSize;
-    int bit1, bit2;
-
-    stateVecSize = qureg.numAmpsPerChunk;
-    qreal *stateVecReal = qureg.stateVec.real;
-    qreal *stateVecImag = qureg.stateVec.imag;
-
-    index = blockIdx.x*blockDim.x + threadIdx.x;
-    if (index>=stateVecSize) return;
-
-    bit1 = extractBit (idQubit1, index);
-    bit2 = extractBit (idQubit2, index);
-    if (bit1 && bit2) {
-        stateVecReal [index] = - stateVecReal [index];
-        stateVecImag [index] = - stateVecImag [index];
-    }
-}
-
-void statevec_controlledPhaseFlip(Qureg qureg, const int idQubit1, const int idQubit2)
-{
-    int threadsPerCUDABlock, CUDABlocks;
-    threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
-    CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
-    statevec_controlledPhaseFlipKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg, idQubit1, idQubit2);
-}
-
-__global__ void statevec_multiControlledPhaseFlipKernel(Qureg qureg, long long int mask)
-{
-    long long int index;
-    long long int stateVecSize;
-
-    stateVecSize = qureg.numAmpsPerChunk;
-    qreal *stateVecReal = qureg.stateVec.real;
-    qreal *stateVecImag = qureg.stateVec.imag;
-
-    index = blockIdx.x*blockDim.x + threadIdx.x;
-    if (index>=stateVecSize) return;
-
-    if (mask == (mask & index) ){
-        stateVecReal [index] = - stateVecReal [index];
-        stateVecImag [index] = - stateVecImag [index];
-    }
-}
-
-void statevec_multiControlledPhaseFlip(Qureg qureg, int *controlQubits, int numControlQubits)
-{
-    int threadsPerCUDABlock, CUDABlocks;
-    long long int mask = getQubitBitMask(controlQubits, numControlQubits);
-    threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
-    CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk)/threadsPerCUDABlock);
-    statevec_multiControlledPhaseFlipKernel<<<CUDABlocks, threadsPerCUDABlock>>>(qureg, mask);
 }
 
 __global__ void statevec_swapQubitAmpsKernel(Qureg qureg, int qb1, int qb2) {
@@ -1073,6 +766,9 @@ __global__ void statevec_swapQubitAmpsKernel(Qureg qureg, int qb1, int qb2) {
 
 void statevec_swapQubitAmpsLocal(Qureg qureg, int qb1, int qb2) 
 {
+    // stage 1 done!
+    // chunkId done!
+    
     int threadsPerCUDABlock, CUDABlocks;
     threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
     CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>2)/threadsPerCUDABlock);
@@ -1130,6 +826,7 @@ __global__ void statevec_hadamardKernel (Qureg qureg, const int targetQubit){
 
 void statevec_hadamardLocal(Qureg qureg, const int targetQubit) 
 {
+    // stage 1 done!
     // chunkID done!
 
     int threadsPerCUDABlock, CUDABlocks;
@@ -1181,6 +878,7 @@ __global__ void statevec_controlledNotKernel(Qureg qureg, const int controlQubit
 
 void statevec_controlledNotLocal(Qureg qureg, const int controlQubit, const int targetQubit)
 {
+    // stage 1 done!
     // chunkID done!
     
     int threadsPerCUDABlock, CUDABlocks;
@@ -1223,8 +921,6 @@ __global__ void copySharedReduceBlock(qreal*arrayIn, qreal *reducedArray, int le
     __syncthreads();
     reduceBlock(tempReductionArray, reducedArray, length);
 }
-
-
 
 __global__ void statevec_findProbabilityOfZeroKernel(
         Qureg qureg, const int measureQubit, qreal *reducedArray
@@ -1278,7 +974,8 @@ __global__ void statevec_findProbabilityOfZeroKernel(
 
 qreal statevec_findProbabilityOfZeroLocal(Qureg qureg, const int measureQubit)
 {
-    // chunk ID done!
+    // stage 1 done!
+    // chunkId done!
     
     long long int numValuesToReduce = qureg.numAmpsPerChunk>>1;
     int valuesPerCUDABlock, numCUDABlocks, sharedMemSize;
@@ -1348,7 +1045,8 @@ __global__ void statevec_calcInnerProductKernel(
  * @TODO could even do the kernel twice, storing real in bra.reduc and imag in ket.reduc?
  */
 Complex statevec_calcInnerProductLocal(Qureg bra, Qureg ket) {
-    // chunkID done!
+    // stage 1 done!
+    // chunkId done!
 
     qreal innerProdReal, innerProdImag;
     
@@ -1435,8 +1133,6 @@ Complex statevec_calcInnerProductLocal(Qureg bra, Qureg ket) {
     return innerProd;
 }
 
-
-
 __global__ void statevec_collapseToKnownProbOutcomeKernel(Qureg qureg, int measureQubit, int outcome, qreal totalProbability)
 {
     // ----- sizes
@@ -1495,7 +1191,10 @@ __global__ void statevec_collapseToKnownProbOutcomeKernel(Qureg qureg, int measu
  * else the state-vector will lose normalisation
  */
 void statevec_collapseToKnownProbOutcomeLocal(Qureg qureg, const int measureQubit, int outcome, qreal outcomeProb)
-{        
+{
+    // stage 1 done!
+    // chunkId done!
+    
     int threadsPerCUDABlock, CUDABlocks;
     threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
     CUDABlocks = ceil((qreal)(qureg.numAmpsPerChunk>>1)/threadsPerCUDABlock);
@@ -1504,51 +1203,80 @@ void statevec_collapseToKnownProbOutcomeLocal(Qureg qureg, const int measureQubi
 
 
 
-__global__ void statevec_setWeightedQuregKernel(Complex fac1, Qureg qureg1, Complex fac2, Qureg qureg2, Complex facOut, Qureg out) {
+//
+// Density Matrix Operations
+//
 
-    long long int ampInd = blockIdx.x*blockDim.x + threadIdx.x;
-    long long int numAmpsToVisit = qureg1.numAmpsPerChunk;
-    if (ampInd >= numAmpsToVisit) return;
-
-    qreal *vecRe1 = qureg1.stateVec.real;
-    qreal *vecIm1 = qureg1.stateVec.imag;
-    qreal *vecRe2 = qureg2.stateVec.real;
-    qreal *vecIm2 = qureg2.stateVec.imag;
-    qreal *vecReOut = out.stateVec.real;
-    qreal *vecImOut = out.stateVec.imag;
-
-    qreal facRe1 = fac1.real; 
-    qreal facIm1 = fac1.imag;
-    qreal facRe2 = fac2.real;
-    qreal facIm2 = fac2.imag;
-    qreal facReOut = facOut.real;
-    qreal facImOut = facOut.imag;
-
-    qreal re1,im1, re2,im2, reOut,imOut;
-    long long int index = ampInd;
-
-    re1 = vecRe1[index]; im1 = vecIm1[index];
-    re2 = vecRe2[index]; im2 = vecIm2[index];
-    reOut = vecReOut[index];
-    imOut = vecImOut[index];
-
-    vecReOut[index] = (facReOut*reOut - facImOut*imOut) + (facRe1*re1 - facIm1*im1) + (facRe2*re2 - facIm2*im2);
-    vecImOut[index] = (facReOut*imOut + facImOut*reOut) + (facRe1*im1 + facIm1*re1) + (facRe2*im2 + facIm2*re2);
+__global__ void densmatr_initPureStateKernel(
+    long long int numPureAmps,
+    qreal *targetVecReal, qreal *targetVecImag, 
+    qreal *copyVecReal, qreal *copyVecImag) 
+{
+    // this is a particular index of the pure copyQureg
+    long long int index = blockIdx.x*blockDim.x + threadIdx.x;
+    if (index>=numPureAmps) return;
+    
+    qreal realRow = copyVecReal[index];
+    qreal imagRow = copyVecImag[index];
+    for (long long int col=0; col < numPureAmps; col++) {
+        qreal realCol =   copyVecReal[col];
+        qreal imagCol = - copyVecImag[col]; // minus for conjugation
+        targetVecReal[col*numPureAmps + index] = realRow*realCol - imagRow*imagCol;
+        targetVecImag[col*numPureAmps + index] = realRow*imagCol + imagRow*realCol;
+    }
 }
 
-void statevec_setWeightedQureg(Complex fac1, Qureg qureg1, Complex fac2, Qureg qureg2, Complex facOut, Qureg out) {
-
-    long long int numAmpsToVisit = qureg1.numAmpsPerChunk;
-
+void densmatr_initPureStateLocal(Qureg targetQureg, Qureg copyQureg)
+{
     int threadsPerCUDABlock, CUDABlocks;
     threadsPerCUDABlock = DEFAULT_THREADS_PER_BLOCK;
-    CUDABlocks = ceil(numAmpsToVisit / (qreal) threadsPerCUDABlock);
-    statevec_setWeightedQuregKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
-        fac1, qureg1, fac2, qureg2, facOut, out
-    );
+    CUDABlocks = ceil((qreal)(copyQureg.numAmpsPerChunk)/threadsPerCUDABlock);
+    densmatr_initPureStateKernel<<<CUDABlocks, threadsPerCUDABlock>>>(
+        copyQureg.numAmpsPerChunk,
+        targetQureg.stateVec.real, targetQureg.stateVec.imag,
+        copyQureg.stateVec.real,   copyQureg.stateVec.imag);
 }
 
-void seedQuESTDefaultLocal(){
+
+//
+// Functions only for single GPU version
+// And not used at all in distributed version
+//
+
+
+qreal NOT_USED_AT_ALL statevec_calcTotalProbLocal(Qureg qureg){
+    /* IJB - implemented using Kahan summation for greater accuracy at a slight floating
+       point operation overhead. For more details see https://en.wikipedia.org/wiki/Kahan_summation_algorithm */
+    /* Don't change the bracketing in this routine! */
+    qreal pTotal=0;
+    qreal y, t, c;
+    long long int index;
+    long long int numAmpsPerRank = qureg.numAmpsPerChunk;
+
+    copyStateFromGPU(qureg);
+
+    c = 0.0;
+    for (index=0; index<numAmpsPerRank; index++){
+        /* Perform pTotal+=qureg.stateVec.real[index]*qureg.stateVec.real[index]; by Kahan */
+        // pTotal+=qureg.stateVec.real[index]*qureg.stateVec.real[index];
+        y = qureg.stateVec.real[index]*qureg.stateVec.real[index] - c;
+        t = pTotal + y;
+        c = ( t - pTotal ) - y;
+        pTotal = t;
+
+        /* Perform pTotal+=qureg.stateVec.imag[index]*qureg.stateVec.imag[index]; by Kahan */
+        //pTotal+=qureg.stateVec.imag[index]*qureg.stateVec.imag[index];
+        y = qureg.stateVec.imag[index]*qureg.stateVec.imag[index] - c;
+        t = pTotal + y;
+        c = ( t - pTotal ) - y;
+        pTotal = t;
+
+
+    }
+    return pTotal;
+}
+
+void NOT_USED_AT_ALL seedQuESTDefaultLocal(){
     // init MT random number generator with three keys -- time and pid
     // for the MPI version, it is ok that all procs will get the same seed as random numbers will only be 
     // used by the master process
@@ -1556,8 +1284,25 @@ void seedQuESTDefaultLocal(){
     unsigned long int key[2];
     getQuESTDefaultSeedKey(key); 
     init_by_array(key, 2); 
-}  
+}
 
+// already redefined in distributed version
+qreal NOT_USED_AT_ALL statevec_getRealAmpLocal(Qureg qureg, long long int index){
+    // stage 1 done!
+    qreal el=0;
+    cudaMemcpy(&el, &(qureg.stateVec.real[index]), 
+            sizeof(*(qureg.stateVec.real)), cudaMemcpyDeviceToHost);
+    return el;
+}
+
+// already redefined in distributed version
+qreal NOT_USED_AT_ALL statevec_getImagAmpLocal(Qureg qureg, long long int index){
+    // stage 1 done!
+    qreal el=0;
+    cudaMemcpy(&el, &(qureg.stateVec.imag[index]), 
+            sizeof(*(qureg.stateVec.imag)), cudaMemcpyDeviceToHost);
+    return el;
+}
 
 #ifdef __cplusplus
 }
