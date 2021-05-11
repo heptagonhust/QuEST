@@ -1071,6 +1071,15 @@ void unitary(Qureg qureg, const int targetQubit, ComplexMatrix2 u);
  */
 void rotateX(Qureg qureg, const int rotQubit, qreal angle);
 
+
+void u1Gate(Qureg qureg, int targetQubit, qreal phi);
+void u2Gate(Qureg qureg, int targetQubit, qreal phi, qreal lambda);
+void u3Gate(Qureg qureg, int targetQubit, qreal theta, qreal phi, qreal lambda);
+void SqX(Qureg qureg, int targetQubit);
+void SqY(Qureg qureg, int targetQubit);
+void SqW(Qureg qureg, int targetQubit);
+void fSim(Qureg qureg, int targetQubit1, int targetQubit2, qreal theta, qreal phi);
+
 /** Rotate a single qubit by a given angle around the Y-axis of the Bloch-sphere. 
  * For angle \f$\theta\f$, applies
  * \f[

@@ -172,6 +172,146 @@ void cloneQureg(Qureg targetQureg, Qureg copyQureg) {
  * unitary gates
  */
 
+void u1Gate(Qureg qureg, int targetQubit, qreal lambda){
+    validateTarget(qureg, targetQubit, __func__);
+
+    qreal cos_ = cos(lambda), sin_ = sin(lambda);
+
+    ComplexMatrix2 u = {
+        .real = {{1.0, 0.0}, {0.0, cos_}},
+        .imag = {{0.0, 0.0}, {0.0, sin_}}
+    };
+    validateOneQubitUnitaryMatrix(u, __func__);
+    
+    statevec_unitary(qureg, targetQubit, u);
+    if (qureg.isDensityMatrix) {
+        statevec_unitary(qureg, targetQubit+qureg.numQubitsRepresented, getConjugateMatrix2(u));
+    }
+    
+    qasm_recordUnitary(qureg, u, targetQubit);
+
+}
+void u2Gate(Qureg qureg, int targetQubit, qreal phi, qreal lambda){
+    validateTarget(qureg, targetQubit, __func__);
+
+    qreal Inv_sqrt2 = 1/sqrt(2);
+    qreal cos_phi = cos(phi)*Inv_sqrt2, sin_phi = sin(phi)*Inv_sqrt2;
+    qreal cos_lambda = cos(lambda)*Inv_sqrt2, sin_lambda = sin(lambda)*Inv_sqrt2;
+    qreal cos_ = cos(phi+lambda)*Inv_sqrt2, sin_ = sin(phi+lambda)*Inv_sqrt2;
+
+    ComplexMatrix2 u = {
+        .real = {{Inv_sqrt2, -cos_lambda}, {cos_phi, cos_}},
+        .imag = {{0.0, -sin_lambda}, {sin_phi, sin_}}
+    };
+    validateOneQubitUnitaryMatrix(u, __func__);
+    
+    statevec_unitary(qureg, targetQubit, u);
+    if (qureg.isDensityMatrix) {
+        statevec_unitary(qureg, targetQubit+qureg.numQubitsRepresented, getConjugateMatrix2(u));
+    }
+    
+    qasm_recordUnitary(qureg, u, targetQubit);
+
+}
+void u3Gate(Qureg qureg, int targetQubit, qreal theta, qreal phi, qreal lambda){
+    validateTarget(qureg, targetQubit, __func__);
+
+    
+    qreal cos_theta = cos(theta/2), sin_theta = sin(theta/2);
+    qreal cos_phi = cos(phi), sin_phi = sin(phi);
+    qreal cos_lambda = cos(lambda), sin_lambda = sin(lambda);
+    qreal cos_ = cos(phi+lambda), sin_ = sin(phi+lambda);
+
+    ComplexMatrix2 u = {
+        .real = {{cos_theta, -cos_lambda*sin_theta}, {cos_phi*sin_theta, cos_*cos_theta}},
+        .imag = {{0.0, -sin_lambda*sin_theta}, {sin_phi*sin_theta, sin_*cos_theta}}
+    };
+    validateOneQubitUnitaryMatrix(u, __func__);
+    
+    statevec_unitary(qureg, targetQubit, u);
+    if (qureg.isDensityMatrix) {
+        statevec_unitary(qureg, targetQubit+qureg.numQubitsRepresented, getConjugateMatrix2(u));
+    }
+    
+    qasm_recordUnitary(qureg, u, targetQubit);
+}
+void SqX(Qureg qureg, int targetQubit){
+    validateTarget(qureg, targetQubit, __func__);
+
+    qreal Inv_sqrt2 = 1/sqrt(2);
+    ComplexMatrix2 u = {
+        .real = {{Inv_sqrt2, 0.0}, {0.0, Inv_sqrt2}},
+        .imag = {{0.0, -Inv_sqrt2}, {-Inv_sqrt2, 0.0}}
+    };
+    validateOneQubitUnitaryMatrix(u, __func__);
+    
+    statevec_unitary(qureg, targetQubit, u);
+    if (qureg.isDensityMatrix) {
+        statevec_unitary(qureg, targetQubit+qureg.numQubitsRepresented, getConjugateMatrix2(u));
+    }
+    
+    qasm_recordUnitary(qureg, u, targetQubit);
+
+}
+void SqY(Qureg qureg, int targetQubit){
+    validateTarget(qureg, targetQubit, __func__);
+
+    qreal Inv_sqrt2 = 1/sqrt(2);
+    ComplexMatrix2 u = {
+        .real = {{Inv_sqrt2, -Inv_sqrt2}, {Inv_sqrt2, Inv_sqrt2}},
+        .imag = {{0.0, 0.0}, {0.0, 0.0}}
+    };
+    validateOneQubitUnitaryMatrix(u, __func__);
+    
+    statevec_unitary(qureg, targetQubit, u);
+    if (qureg.isDensityMatrix) {
+        statevec_unitary(qureg, targetQubit+qureg.numQubitsRepresented, getConjugateMatrix2(u));
+    }
+    
+    qasm_recordUnitary(qureg, u, targetQubit);
+
+}
+void SqW(Qureg qureg, int targetQubit){
+    validateTarget(qureg, targetQubit, __func__);
+
+    qreal Inv_sqrt2 = 1/sqrt(2);
+    ComplexMatrix2 u = {
+        .real = {{Inv_sqrt2, -0.5}, {0.5, Inv_sqrt2}},
+        .imag = {{0.0, -0.5}, {-0.5, 0.0}}
+    };
+    validateOneQubitUnitaryMatrix(u, __func__);
+    
+    statevec_unitary(qureg, targetQubit, u);
+    if (qureg.isDensityMatrix) {
+        statevec_unitary(qureg, targetQubit+qureg.numQubitsRepresented, getConjugateMatrix2(u));
+    }
+    
+    qasm_recordUnitary(qureg, u, targetQubit);
+}
+void fSim(Qureg qureg, int targetQubit1, int targetQubit2, qreal theta, qreal phi){
+
+    validateMultiTargets(qureg, (int []) {targetQubit1, targetQubit2}, 2, __func__);
+
+    qreal cos_theta = cos(theta), sin_theta = sin(theta);
+    qreal cos_phi = cos(phi), sin_phi = sin(phi);
+    ComplexMatrix4 u = {
+        .real = {{1.0, 0.0, 0.0, 0.0}, {0.0, cos_theta, 0.0, 0.0}, {0.0, 0.0, cos_theta, 0.0}, {0.0, 0.0, 0.0, cos_phi}},
+        .imag = {{0.0, 0.0, 0.0, 0.0}, {0.0, 0.0, -sin_theta, 0.0}, {0.0, -sin_theta, 0.0, 0.0}, {0.0, 0.0, 0.0, -sin_phi}}
+    };
+
+    validateTwoQubitUnitaryMatrix(qureg, u, __func__);
+    
+    statevec_twoQubitUnitary(qureg, targetQubit1, targetQubit2, u);
+    if (qureg.isDensityMatrix) {
+        int shift = qureg.numQubitsRepresented;
+        statevec_twoQubitUnitary(qureg, targetQubit1+shift, targetQubit2+shift, getConjugateMatrix4(u));
+    }
+    
+    qasm_recordComment(qureg, "Here, an undisclosed 2-qubit unitary was applied.");
+
+}
+
+
 void hadamard(Qureg qureg, const int targetQubit) {
     validateTarget(qureg, targetQubit, __func__);
     
