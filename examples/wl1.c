@@ -398,6 +398,32 @@ int main (int narg, char *argv[]) {
     rotateZ(q, 15, 5.742598516948371);
     pauliZ(q, 24);
     pauliX(q, 4);
+    // TEST START
+    // int rotate[] = {0, 27, 19, 6, 8};
+    // multiRotateZ(q, rotate, 5, .5);
+    // int phase_controlled[] = {1, 0, 29, 4, 17};
+    // multiControlledPhaseFlip(q, phase_controlled, 5);
+    // controlledPhaseFlip(q, 0, 29);
+    // controlledPhaseFlip(q, 1, 23);
+    // controlledPhaseFlip(q, 9, 23);
+    // controlledPhaseFlip(q, 7, 16);
+    // controlledPhaseFlip(q, 0, 4);
+    // controlledPhaseShift(q, 0, 29, .1);
+    // controlledPhaseShift(q, 1, 28, .1);
+    // controlledPhaseShift(q, 5, 14, .1);
+    // controlledPhaseShift(q, 9, 19, .1);
+    // controlledPhaseShift(q, 26, 4, .1);
+    // for (int i = 0; i < 10; ++i)
+    // {
+    //     int res = collapseToOutcome(q, i, 0);
+    //     printf("%d res: %d\n", i, res);
+    // }
+    // swapGate(q, 1, 28);
+    // swapGate(q, 2, 29);
+    // swapGate(q, 3, 8);
+    // swapGate(q, 6, 15);
+    // swapGate(q, 7, 11);
+    // TEST END
     controlledPauliY(q, 21, 6);
     pauliY(q, 6);
     pauliZ(q, 17);
@@ -516,7 +542,6 @@ int main (int narg, char *argv[]) {
     controlledNot(q, 19, 17);
     rotateX(q, 25, 2.852692622378647);
     sGate(q, 22);
-
     printf("\n");
     for(long long int i=0; i<30; ++i){
         q_measure[i] = calcProbOfOutcome(q,  i, 1);
