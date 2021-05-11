@@ -5009,6 +5009,10 @@ qreal statevec_findProbabilityOfZeroLocalSmall (Qureg qureg,
 {
     // ----- indices
     const long long int sizeTask = (1LL << measureQubit);
+    if(sizeTask >= 4){
+        return statevec_findProbabilityOfZeroLocalSmallSIMD(qureg,measureQubit);
+    }
+
     const long long int numTasks = (qureg.numAmpsPerChunk>>(1 + measureQubit)) ;
 
     long long int index;                                       // current index for first half block
@@ -5042,6 +5046,52 @@ qreal statevec_findProbabilityOfZeroLocalSmall (Qureg qureg,
     }
     return totalProbability;
 }
+
+
+//TODO
+//SIMD
+qreal statevec_findProbabilityOfZeroLocalSmallSIMD (Qureg qureg,
+        const int measureQubit)
+{
+    // ----- indices
+
+    const long long int sizeTask = (1LL << measureQubit);
+    const long long int numTasks = (qureg.numAmpsPerChunk>>(1 + measureQubit)) ;
+
+    long long int index;                                       // current index for first half block
+    // ----- measured probability
+    qreal   totalProbability;                                  // probability (returned) value
+    // ----- temp variables
+    long long thisTask;
+
+    // initialise returned value
+
+    
+    totalProbability = 0.0;
+
+    qreal *stateVecReal = qureg.stateVec.real;
+    qreal *stateVecImag = qureg.stateVec.imag;
+
+# ifdef _OPENMP
+# pragma omp parallel \
+    shared    (numTasks,stateVecReal,stateVecImag) \
+    private   (thisTask,index) \
+    reduction (+:totalProbability)
+# endif
+    {
+# ifdef _OPENMP
+# pragma omp for schedule  (static)
+# endif
+        for (thisTask=0; thisTask<numTasks; thisTask++) 
+            for (index = thisTask * sizeTask * 2; index < thisTask * sizeTask * 2 + sizeTask; ++ index) {
+
+                totalProbability += stateVecReal[index]*stateVecReal[index]
+                    + stateVecImag[index]*stateVecImag[index];
+        }
+    }
+    return totalProbability;
+}
+
 
 
 /** Measure the probability of a specified qubit being in the zero state across all amplitudes held in this chunk.

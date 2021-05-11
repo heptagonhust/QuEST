@@ -210,6 +210,7 @@ void statevec_controlledNotDistributed (Qureg qureg, const int controlQubit,
 
 qreal statevec_findProbabilityOfZeroLocal (Qureg qureg, const int measureQubit);
 qreal statevec_findProbabilityOfZeroLocalSmall (Qureg qureg, const int measureQubit);
+qreal statevec_findProbabilityOfZeroLocalSmallSIMD (Qureg qureg, const int measureQubit);
 
 qreal statevec_findProbabilityOfZeroDistributed (Qureg qureg);
 
