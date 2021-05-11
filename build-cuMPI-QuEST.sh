@@ -25,15 +25,15 @@ if [[ "$?" -ne "0" ]]; then
 fi
 \cp -f src/libcuMPI.so /lib64/libcuMPI.so
 
-# GHZ_QFT
-cd $QUESTHOME/GHZ_QFT
+# Build for workload
+cd $QUESTHOME
 if [ "$1" = "empty" ]; then
   if [ -d "build" ]; then 
     rm -rf build
   fi
   mkdir build
   cd build
-  cmake ../../ -DGPUACCELERATED=ON -DMULTITHREADED=OFF
+  cmake .. -DGPUACCELERATED=ON -DMULTITHREADED=OFF
 else
   cd build
 fi
@@ -43,28 +43,8 @@ if [[ "$?" -ne "0" ]]; then
   read 
   exit 255
 fi
-\cp -f qft ~
+\cp -f wl1 wl2 wl3 wl4 ~
 \cp -f QuEST/libQuEST.so /lib64/libQuEST.so
 
-# random
-cd ../..
-cd random
-if [ "$1" = "empty" ]; then
-  if [ -d "build" ]; then 
-    rm -rf build
-  fi
-  mkdir build
-  cd build
-  cmake ../../ -DGPUACCELERATED=ON -DMULTITHREADED=OFF
-else
-  cd build
-fi
-make -j
-if [[ "$?" -ne "0" ]]; then
-  cd $QUESTHOME
-  read 
-  exit 255
-fi
-\cp -f demo ~
 
 cd $QUESTHOME
