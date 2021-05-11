@@ -304,8 +304,8 @@ void statevec_createQureg(Qureg *qureg, int numQubits, QuESTEnv env)
     qureg->isDensityMatrix = 0;
 
     // allocate GPU memory
-    cudaMalloc(&(qureg->deviceStateVec.real), qureg->numAmpsPerChunk*sizeof(*(qureg->deviceStateVec.real)));
-    cudaMalloc(&(qureg->deviceStateVec.imag), qureg->numAmpsPerChunk*sizeof(*(qureg->deviceStateVec.imag)));
+    cudaMallocManaged(&(qureg->deviceStateVec.real), qureg->numAmpsPerChunk*sizeof(*(qureg->deviceStateVec.real)));
+    cudaMallocManaged(&(qureg->deviceStateVec.imag), qureg->numAmpsPerChunk*sizeof(*(qureg->deviceStateVec.imag)));
     cudaMalloc(&(qureg->firstLevelReduction), ceil(qureg->numAmpsPerChunk/(qreal)REDUCE_SHARED_SIZE)*sizeof(qreal));
     cudaMalloc(&(qureg->secondLevelReduction), ceil(qureg->numAmpsPerChunk/(qreal)(REDUCE_SHARED_SIZE*REDUCE_SHARED_SIZE))*
             sizeof(qreal));
@@ -409,9 +409,9 @@ void copyStateFromGPU(Qureg qureg)
     cudaDeviceSynchronize();
     if (DEBUG) printf("Copying data from GPU\n");
     cudaMemcpy(qureg.stateVec.real, qureg.deviceStateVec.real, 
-            qureg.numAmpsPerChunk*sizeof(*(qureg.deviceStateVec.real)), cudaMemcpyDeviceToHost);
+            qureg.numAmpsPerChunk*sizeof(*(qureg.deviceStateVec.real)), cudaMemcpyDefault);
     cudaMemcpy(qureg.stateVec.imag, qureg.deviceStateVec.imag, 
-            qureg.numAmpsPerChunk*sizeof(*(qureg.deviceStateVec.imag)), cudaMemcpyDeviceToHost);
+            qureg.numAmpsPerChunk*sizeof(*(qureg.deviceStateVec.imag)), cudaMemcpyDefault);
     if (DEBUG) printf("Finished copying data from GPU\n");
 }
 
@@ -447,14 +447,14 @@ void statevec_reportStateToScreen(Qureg qureg, QuESTEnv env, int reportRank){
 qreal statevec_getRealAmp(Qureg qureg, long long int index){
     qreal el=0;
     cudaMemcpy(&el, &(qureg.deviceStateVec.real[index]), 
-            sizeof(*(qureg.deviceStateVec.real)), cudaMemcpyDeviceToHost);
+            sizeof(*(qureg.deviceStateVec.real)), cudaMemcpyDefault);
     return el;
 }
 
 qreal statevec_getImagAmp(Qureg qureg, long long int index){
     qreal el=0;
     cudaMemcpy(&el, &(qureg.deviceStateVec.imag[index]), 
-            sizeof(*(qureg.deviceStateVec.imag)), cudaMemcpyDeviceToHost);
+            sizeof(*(qureg.deviceStateVec.imag)), cudaMemcpyDefault);
     return el;
 }
 
