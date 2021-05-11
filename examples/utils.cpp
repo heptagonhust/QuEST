@@ -59,7 +59,11 @@ double InnerProduct(const Qureg &Q1, const Qureg &Q2){
         imag_part += CA1.real[ind]*CA2.imag[ind]-CA1.imag[ind]*CA2.real[ind];
     }
 
+    // Complex ret = calcInnerProduct(Q1, Q2);
+
     /* The expectation of a Hamiltonian should be real! */
+    // assert(abs(ret.imag)<1E-3);
+    // return ret.real;
     assert(abs(imag_part)<1E-3);
     return real_part;
 }

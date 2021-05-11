@@ -59,8 +59,10 @@ int main () {
 
     InvQFT(QReg, numQubits);
 
+    printf("InvQFT over\n");
     qreal prob;
     for(int ind=0; ind<numQubits; ++ind){
+        printf("%d calc prob\n", ind);
         prob = calcProbOfOutcome(QReg, ind, 1);
 
         if(env.rank==0){

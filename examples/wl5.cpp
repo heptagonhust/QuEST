@@ -39,6 +39,7 @@ int main () {
 
     qreal prob;
     for(int ind=0; ind<numQubits; ++ind){
+        printf("%d calc prob\n", ind);
         prob = calcProbOfOutcome(QReg, ind, 1);
         if(env.rank==0){
             printf("Prob of qubit %2d (outcome=1) is: %12.6f\n", ind, prob);
@@ -47,6 +48,7 @@ int main () {
     }
 
     for(int i=0; i<10; ++i){
+        printf("    %d get amp\n", i);
         Complex amp = getAmp(QReg, i);
 	    if(env.rank==0) fprintf(fvec, "Amplitude of %dth state vector: %12.6f,%12.6f\n", i, amp.real, amp.imag);
     }

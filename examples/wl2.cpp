@@ -60,17 +60,22 @@ int main () {
 
     for(int ind=0; ind<numQubits; ++ind)
         hadamard(QReg, ind);
-
+    puts("hadamard over");
     for(int ind=0; ind<numQubits; ++ind){
+        printf("Rotatint %d\n",ind);
         controlledRotateX(QReg, ind, (ind+halfnum)%numQubits, PI/(ind+1));
         controlledRotateY(QReg, ind, (ind+halfnum)%numQubits, PI/(ind+1));
     }
-
+    puts("controlledRotate over");
     InvQFT(QReg, numQubits);
+    puts("InvQFT over");
 
     /* add QFT and InvQFT */
     QFT(QReg, numQubits);
+        puts("QFT over");
+
     InvQFT(QReg, numQubits);
+    puts("InvQFT over");
 
     qreal prob;
     for(int ind=0; ind<numQubits; ++ind){
