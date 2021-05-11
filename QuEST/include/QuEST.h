@@ -1193,6 +1193,16 @@ void rotateAroundAxis(Qureg qureg, const int rotQubit, qreal angle, Vector axis)
  */
 void controlledRotateX(Qureg qureg, const int controlQubit, const int targetQubit, qreal angle);
 
+
+void u1Gate(Qureg qureg, int targetQubit, qreal phi);
+void u2Gate(Qureg qureg, int targetQubit, qreal phi, qreal lambda);
+void u3Gate(Qureg qureg, int targetQubit, qreal theta, qreal phi, qreal lambda);
+void SqX(Qureg qureg, int targetQubit);
+void SqY(Qureg qureg, int targetQubit);
+void SqW(Qureg qureg, int targetQubit);
+void fSim(Qureg qureg, int targetQubit1, int targetQubit2, qreal theta, qreal phi);
+
+
 /** Applies a controlled rotation by a given angle around the Y-axis of the Bloch-sphere. 
  * The target qubit is rotated in states where the control qubit has value 1.
  *
