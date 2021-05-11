@@ -209,6 +209,7 @@ void statevec_controlledNotDistributed (Qureg qureg, const int controlQubit,
         ComplexArray stateVecOut);
 
 qreal statevec_findProbabilityOfZeroLocal (Qureg qureg, const int measureQubit);
+qreal statevec_findProbabilityOfZeroLocalSmall (Qureg qureg, const int measureQubit);
 
 qreal statevec_findProbabilityOfZeroDistributed (Qureg qureg);
 
