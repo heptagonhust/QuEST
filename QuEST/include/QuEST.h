@@ -474,6 +474,16 @@ void initDebugState(Qureg qureg);
  */
 void initStateFromAmps(Qureg qureg, qreal* reals, qreal* imags);
 
+void u1Gate(Qureg qureg, int targetQubit, qreal phi);
+void u2Gate(Qureg qureg, int targetQubit, qreal phi, qreal lambda);
+void u3Gate(Qureg qureg, int targetQubit, qreal theta, qreal phi, qreal lambda);
+void SqX(Qureg qureg, int targetQubit);
+void SqY(Qureg qureg, int targetQubit);
+void SqW(Qureg qureg, int targetQubit);
+void fSim(Qureg qureg, int targetQubit1, int targetQubit2, qreal theta, qreal phi);
+
+
+
 /** Overwrites a subset of the amplitudes in \p qureg, with those passed in \p reals and \p imags.
  * Only amplitudes with indices in [\p startInd, \p startInd + \p numAmps] will be changed, which means
  * the new state may not be L2 normalised. This allows the user to initialise a custom state by 

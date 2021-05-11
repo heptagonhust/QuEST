@@ -43,7 +43,7 @@ if [[ "$?" -ne "0" ]]; then
   read 
   exit 255
 fi
-\cp -f wl1 wl2 wl3 wl4 ~
+\cp -f wl1 wl2 wl3 wl4 wl5 ~
 \cp -f QuEST/libQuEST.so /lib64/libQuEST.so
 
 

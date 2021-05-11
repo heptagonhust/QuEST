@@ -12,11 +12,11 @@ project(QuEST_Project)
 # ----- USER OPTIONS ----------------------------------------------------------
 # -----------------------------------------------------------------------------
 
-set(WL1_SOURCE "examples/wl1.c"  CACHE STRING "workload source 1")
-set(WL2_SOURCE "examples/wl2.c" CACHE STRING "workload source 2")
-set(WL3_SOURCE "examples/wl3.c" CACHE STRING "workload source 3")
-set(WL4_SOURCE "examples/wl4.c" CACHE STRING "workload source 4")
-set(WL5_SOURCE "examples/wl5.c" CACHE STRING "workload source 5")
+set(WL1_SOURCE "examples/wl1.cpp"  CACHE STRING "workload source 1")
+set(WL2_SOURCE "examples/wl2.cpp" CACHE STRING "workload source 2")
+set(WL3_SOURCE "examples/wl3.cpp" CACHE STRING "workload source 3")
+set(WL4_SOURCE "examples/wl4.cpp" CACHE STRING "workload source 4")
+set(WL5_SOURCE "examples/wl5.cpp" CACHE STRING "workload source 5")
 
 set(WL1_EXE "wl1"  CACHE STRING "workload 1 exe")
 set(WL2_EXE "wl2" CACHE STRING "workload 2 exe")
@@ -26,7 +26,7 @@ set(WL5_EXE "wl5" CACHE STRING "workload 5 exe")
 
 add_compile_options(-mavx)
 add_compile_options(-mvzeroupper)
-add_compile_options(-std=gnu99)
+# add_compile_options(-std=gnu99)
 
 option(TESTING "Enable test suite functionality -- requires test suite available" ON)
 set(QuEST_UTIL_DIR_NAME "utilities" CACHE STRING
