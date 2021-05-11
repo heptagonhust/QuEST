@@ -33,7 +33,7 @@ if [ "$1" = "empty" ]; then
   fi
   mkdir build
   cd build
-  cmake ../../ -DGPUACCELERATED=ON -DMULTITHREADED=OFF
+  cmake .. -DGPUACCELERATED=ON -DMULTITHREADED=OFF
 else
   cd build
 fi
