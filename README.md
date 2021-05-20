@@ -1,4 +1,33 @@
-# [QuEST](https://quest.qtechtheory.org)
+# QuEST Distributed GPU version
+
+## Usage
+
+To run this version in multi-GPU environments (either in one node, or across the network), you can use the commands as follows:
+
+```bash
+# init MPI environment, e.g. source /path/to/intel/setvars.sh
+mkdir build
+./build-cuMPI-QuEST.sh empty
+mpirun -np 2 build/random
+```
+
+if you already build before and `/path/to/QuEST/build` exists, just run `./build-cuMPI-QuEST.sh` in the QuEST root directory for incremental build.
+
+## Details
+
+To implement the distributed GPU version, we mainly referred to the distributed CPU version to find some parallel tactics. And our work is abstracted below:
+
+* Implemented CUDA kernel functions to vectorize all quantum gates in origin v3.0.0, mainly based on state vectors representation method.
+* Utilized multi-GPU Direct RDMA to improve network communications (using a self-made runtime library with NCCL + MPI, [public in GitHub](https://github.com/ueqri/cuMPI)).
+* Performed overlapped computing on GPU, while swapping data between VRAM and RAM.
+* Introduced pipelining by Unified Virtual Addressing to fine-tune some parts, in order to:
+  * solve the memory-bound issue
+  * extend the probability of GPU acceleration for more QuBit numbers (without UVA, 30 qubits use ~32GB VRAM totally, 31 -> ~64GB, ... the usage of VRAM is increased exponentially)
+  * (only tested in `uva-test` branch)
+
+Note: the source files structure in `/path/to/QuEST/QuEST/src/GPU/` **only resembles** `/path/to/QuEST/QuEST/src/CPU/`, but actually not the same. For example, QuEST_gpu_local.cu is not similar to QuEST_cpu_local.c, thus you can't use the former source independently as the latter one to build a single GPU/CPU binary.
+
+# Origin Repository: [QuEST](https://quest.qtechtheory.org)
 
 ## Introduction
 

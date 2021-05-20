@@ -12,17 +12,21 @@ project(QuEST_Project)
 # ----- USER OPTIONS ----------------------------------------------------------
 # -----------------------------------------------------------------------------
 
-set(WL1_SOURCE "examples/wl1.cpp"  CACHE STRING "workload source 1")
-set(WL2_SOURCE "examples/wl2.cpp" CACHE STRING "workload source 2")
-set(WL3_SOURCE "examples/wl3.cpp" CACHE STRING "workload source 3")
-set(WL4_SOURCE "examples/wl4.cpp" CACHE STRING "workload source 4")
-set(WL5_SOURCE "examples/wl5.cpp" CACHE STRING "workload source 5")
+set(RANDOM_30QUBITS "examples/random_30.cpp" CACHE STRING "Random circuit (30 qubits)")
+set(QFT_30QUBITS "examples/qft.cpp" CACHE STRING "Quantum Fourier Transform (30 qubits)")
+set(WL1_SOURCE "examples/wl1.cpp" CACHE STRING "Final Round Workload 1")
+set(WL2_SOURCE "examples/wl2.cpp" CACHE STRING "Final Round Workload 2")
+set(WL3_SOURCE "examples/wl3.cpp" CACHE STRING "Final Round Workload 3")
+set(WL4_SOURCE "examples/wl4.cpp" CACHE STRING "Final Round Workload 4")
+set(WL5_SOURCE "examples/wl5.cpp" CACHE STRING "Final Round Workload 5")
 
-set(WL1_EXE "wl1"  CACHE STRING "workload 1 exe")
-set(WL2_EXE "wl2" CACHE STRING "workload 2 exe")
-set(WL3_EXE "wl3" CACHE STRING "workload 3 exe")
-set(WL4_EXE "wl4" CACHE STRING "workload 4 exe")
-set(WL5_EXE "wl5" CACHE STRING "workload 5 exe")
+set(RANDOM_EXE "random" CACHE STRING "Random circuit (30 qubits) exe")
+set(QFT_EXE "qft" CACHE STRING "Quantum Fourier Transform (30 qubits) exe")
+set(WL1_EXE "wl1" CACHE STRING "Final Round Workload 1 exe")
+set(WL2_EXE "wl2" CACHE STRING "Final Round Workload 2 exe")
+set(WL3_EXE "wl3" CACHE STRING "Final Round Workload 3 exe")
+set(WL4_EXE "wl4" CACHE STRING "Final Round Workload 4 exe")
+set(WL5_EXE "wl5" CACHE STRING "Final Round Workload 5 exe")
 
 add_compile_options(-mavx)
 add_compile_options(-mvzeroupper)
@@ -50,6 +54,26 @@ endif()
 # -----------------------------------------------------------------------------
 # ----- USER EXECUTABLE -------------------------------------------------------
 # -----------------------------------------------------------------------------
+
+# Create user executable
+add_executable(${RANDOM_EXE} ${RANDOM_30QUBITS})
+
+# Link libraries to user executable, including QuEST library
+if (WIN32)
+    target_link_libraries(${RANDOM_EXE} QuEST)
+else ()
+    target_link_libraries(${RANDOM_EXE} QuEST m)
+endif()
+
+# Create user executable
+add_executable(${QFT_EXE} ${QFT_30QUBITS})
+
+# Link libraries to user executable, including QuEST library
+if (WIN32)
+    target_link_libraries(${QFT_EXE} QuEST)
+else ()
+    target_link_libraries(${QFT_EXE} QuEST m)
+endif()
 
 # Create user executable
 add_executable(${WL1_EXE} ${WL1_SOURCE})

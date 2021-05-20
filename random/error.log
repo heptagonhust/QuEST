@@ -1,6 +1,0 @@
-[ 69%] Built target QuEST
-[ 84%] Built target qft
-Scanning dependencies of target demo
-[ 92%] Building C object CMakeFiles/demo.dir/examples/random.c.o
-[100%] Linking C executable demo
-[100%] Built target demo
